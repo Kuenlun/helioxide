@@ -10,7 +10,11 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  license-check:
+    uses: ./.github/workflows/license-check.yml
+
   check:
+    needs: [license-check]
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -28,12 +32,16 @@ jobs:
 
   merge-gate:
     runs-on: ubuntu-latest
-    needs: [check]
+    needs: [check, license-check]
     if: always()
     steps:
       - name: Check results
         run: |
           if [[ "${{ needs.check.result }}" != "success" ]]; then
             echo "::error::Check failed: ${{ needs.check.result }}"
+            exit 1
+          fi
+          if [[ "${{ needs.license-check.result }}" != "success" ]]; then
+            echo "::error::License check failed: ${{ needs.license-check.result }}"
             exit 1
           fi
