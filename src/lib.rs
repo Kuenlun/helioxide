@@ -1,3 +1,5 @@
+#![cfg_attr(test, feature(coverage_attribute))]
+
 pub mod error;
 
 use chrono::{DateTime, Datelike, TimeZone, Timelike};
@@ -196,6 +198,7 @@ pub fn calculate_calendar_date_from_julian_day(
 }
 
 #[cfg(test)]
+#[coverage(off)]
 mod tests {
     use super::*;
 
