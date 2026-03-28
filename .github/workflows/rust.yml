@@ -2,29 +2,26 @@ name: Rust
 
 on:
   push:
-    branches: [ "master", "develop" ]
+    branches: ["master", "develop"]
   pull_request:
-    branches: [ "master", "develop" ]
+    branches: ["master", "develop"]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  check:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Install Rust
-      run: rustup install stable
-    - name: Add rustfmt
-      run: rustup component add rustfmt
-    - name: Check formatting
-      run: cargo fmt --all -- --check
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+      - name: Install lockpick
+        run: cargo install --git https://github.com/Kuenlun/lockpick
+      - name: Run checks
+        run: lockpick
