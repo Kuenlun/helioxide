@@ -2,12 +2,6 @@ name: License Check
 
 on:
   workflow_call:
-  push:
-    paths:
-      - "src/**"
-  pull_request:
-    paths:
-      - "src/**"
 
 jobs:
   license-check:
