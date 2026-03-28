@@ -19,14 +19,48 @@ impl DateTimeWithDUT1 {
     }
 }
 
-/// Returns the integer part of a calculated term (truncation towards zero).
+/// Enables conversion from an `f64` by extracting its integer component.
+pub trait FromTruncatedF64 {
+    /// Constructs `Self` by truncating the fractional part towards zero.
+    fn from_truncated(val: f64) -> Self;
+}
+
+impl FromTruncatedF64 for f64 {
+    /// Retains the integer component as an `f64`, discarding the fraction.
+    #[inline]
+    fn from_truncated(val: f64) -> Self {
+        val.trunc()
+    }
+}
+
+impl FromTruncatedF64 for i32 {
+    /// Converts to an `i32` by truncating the value towards zero.
+    #[allow(clippy::cast_possible_truncation)] // Truncation is intentional
+    #[inline]
+    fn from_truncated(val: f64) -> Self {
+        val as Self
+    }
+}
+
+/// Implements the `INT` function from the NREL SPA article, truncating towards zero.
 ///
-/// This implements the `INT` function as defined in the reference paper:
-/// e.g., INT(8.7) = 8, INT(8.2) = 8, and INT(-8.7) = -8.
-#[allow(clippy::cast_possible_truncation)]
+/// # Examples
+///
+/// ```
+/// use helioxide::int;
+///
+/// let a: i32 = int(8.7);
+/// let b: i32 = int(8.2);
+/// let c: i32 = int(-8.7);
+///
+/// assert_eq!(a, 8);
+/// assert_eq!(b, 8);
+/// assert_eq!(c, -8);
+/// ```
 #[inline]
-const fn int(x: f64) -> i32 {
-    x as i32
+#[must_use]
+pub fn int<T: FromTruncatedF64>(x: f64) -> T {
+    T::from_truncated(x)
 }
 
 /// Computes the Julian Day for the provided datetime, accounting for DUT1 and timezone corrections.
@@ -60,16 +94,16 @@ pub fn calculate_julian_day(datetime: &DateTimeWithDUT1) -> f64 {
             + (f64::from(dt.minute()) + (seconds + datetime.dut1 - tz_offset_s) / 60.0) / 60.0)
             / 24.0;
 
-    let julian_day: f64 = (365.25 * f64::from(year + 4716)).trunc()
-        + (30.6001 * f64::from(month + 1)).trunc()
+    let julian_day: f64 = int::<f64>(365.25 * f64::from(year + 4716))
+        + int::<f64>(30.6001 * f64::from(month + 1))
         + day_decimal
         - 1524.5;
 
     if julian_day > 2_299_160.0 {
         // Gregorian calendar correction
         let b = {
-            let a = (f64::from(year) / 100.0).trunc();
-            2.0 - a + (a / 4.0).trunc()
+            let a = int::<f64>(f64::from(year) / 100.0);
+            2.0 - a + int::<f64>(a / 4.0)
         };
         julian_day + b
     } else {
@@ -94,7 +128,7 @@ pub fn calculate_julian_day(datetime: &DateTimeWithDUT1) -> f64 {
 /// println!("Calendar date for Julian Day {}: {}", julian_day, datetime);
 /// ```
 #[must_use]
-#[allow(clippy::many_single_char_names)]
+#[allow(clippy::many_single_char_names)] // Keep single-letter names to mirror NREL SPA notation
 pub fn calculate_calendar_date_from_julian_day(
     julian_day: f64,
     tz: Tz,
@@ -106,52 +140,52 @@ pub fn calculate_calendar_date_from_julian_day(
         .as_seconds_f64()
         / 86_400.0;
     let jd = julian_day + 0.5 + tz_offset_days;
-    let z = jd.trunc();
+    let z = int::<f64>(jd);
     let f = jd - z;
 
     // A.3.2. If Z is less than 2299161, then record A equals Z. Else, calculate the term B
     let a = if z < 2_299_161.0 {
         z
     } else {
-        let b = ((z - 1_867_216.25) / 36_524.25).trunc(); // A15
-        z + 1.0 + b - (b / 4.0).trunc() // A16
+        let b = int::<f64>((z - 1_867_216.25) / 36_524.25); // A15
+        z + 1.0 + b - int::<f64>(b / 4.0) // A16
     };
 
     // A.3.3. Calculate the term C
     let c = a + 1524.0; // A17
 
     // A.3.4. Calculate the term D
-    let d = ((c - 122.1) / 365.25).trunc(); // A18
+    let d = int::<f64>((c - 122.1) / 365.25); // A18
 
     // A.3.5. Calculate the term G
-    let g = (365.25 * d).trunc(); // A19
+    let g = int::<f64>(365.25 * d); // A19
 
     // A.3.6. Calculate the term I
-    let i = ((c - g) / 30.6001).trunc(); // A20
+    let i = int::<f64>((c - g) / 30.6001); // A20
 
     // A.3.7. Calculate the day number of the month with decimals
-    let day_decimal = c - g - (30.6001 * i).trunc() + f; // A21
+    let day_decimal = c - g - int::<f64>(30.6001 * i) + f; // A21
 
     // A.3.8. Calculate the month number (A22)
-    let month = if int(i) < 14 {
-        int(i).cast_unsigned() - 1
+    let month = if int::<i32>(i) < 14 {
+        int::<i32>(i).cast_unsigned() - 1
     } else {
-        int(i).cast_unsigned() - 13
+        int::<i32>(i).cast_unsigned() - 13
     };
 
     // A.3.8. Calculate the month number (A23)
     let year = if month > 2 {
-        int(d) - 4716
+        int::<i32>(d) - 4716
     } else {
-        int(d) - 4715
+        int::<i32>(d) - 4715
     };
 
-    let day = int(day_decimal).cast_unsigned();
-    let day_fraction = day_decimal - day_decimal.trunc();
+    let day = int::<i32>(day_decimal).cast_unsigned();
+    let day_fraction = day_decimal - int::<f64>(day_decimal);
 
     // Convert the fractional day into total seconds.
     // Rounding prevents floating-point precision issues from dropping a second.
-    let total_seconds = int((day_fraction * 86_400.0).round()).cast_unsigned();
+    let total_seconds = int::<i32>((day_fraction * 86_400.0).round()).cast_unsigned();
 
     // Extract time components using standard integer arithmetic
     let hour = total_seconds / 3600;
@@ -229,5 +263,26 @@ mod tests {
                 "Calendar date mismatch for JD {expected_jd}. Expected: {dt}, Got: {recovered}"
             );
         }
+    }
+
+    /// Verifies that `int::<i32>` truncates positive and negative values toward zero.
+    #[test]
+    fn test_int_truncates_towards_zero_i32() {
+        assert_eq!(int::<i32>(8.7), 8_i32);
+        assert_eq!(int::<i32>(8.2), 8_i32);
+        assert_eq!(int::<i32>(-8.7), -8_i32);
+        assert_eq!(int::<i32>(-8.2), -8_i32);
+        assert_eq!(int::<i32>(0.0), 0_i32);
+    }
+
+    /// Verifies that `int::<f64>` preserves only the integer part by truncating toward zero.
+    #[test]
+    #[allow(clippy::float_cmp)] // Truncation is exact, so direct comparison is valid
+    fn test_int_truncates_towards_zero_f64() {
+        assert_eq!(int::<f64>(8.7), 8.0_f64);
+        assert_eq!(int::<f64>(8.2), 8.0_f64);
+        assert_eq!(int::<f64>(-8.7), -8.0_f64);
+        assert_eq!(int::<f64>(-8.2), -8.0_f64);
+        assert_eq!(int::<f64>(0.0), 0.0_f64);
     }
 }
