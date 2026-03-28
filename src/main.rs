@@ -11,7 +11,7 @@ fn main() -> Result<(), HelioxideError> {
 
     let tz: Tz = "Europe/Madrid".parse()?;
     let now = Utc::now().with_timezone(&tz);
-    info!("Now: {:?}", now); // To check if lockpick is working correctly in CI
+    info!("Now: {now:?}");
 
     Ok(())
 }
