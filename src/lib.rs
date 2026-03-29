@@ -16,7 +16,28 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use thiserror::Error;
+#![cfg_attr(test, feature(coverage_attribute))]
+#![feature(const_trait_impl)]
 
-#[derive(Error, Debug)]
-pub enum HelioxideError {}
+pub mod error;
+pub mod helper;
+pub mod julian;
+
+use chrono::DateTime;
+use chrono_tz::Tz;
+
+#[derive(Debug)]
+pub struct DateTimeWithDUT1 {
+    datetime: DateTime<Tz>,
+    dut1: f64,
+}
+
+impl DateTimeWithDUT1 {
+    #[must_use]
+    pub const fn new(datetime: DateTime<Tz>) -> Self {
+        Self {
+            datetime,
+            dut1: 0.0,
+        }
+    }
+}
