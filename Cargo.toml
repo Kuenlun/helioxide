@@ -2,6 +2,10 @@
 name = "helioxide"
 version = "0.1.0"
 edition = "2024"
+description = "Rust implementation of NREL Solar Position Algorithm (SPA)"
+repository = "https://github.com/Kuenlun/helioxide"
+authors = ["Juan Luis Leal Contreras <kuenlunleal@gmail.com>"]
+license = "GPL-3.0-or-later"
 
 [dependencies]
 chrono = "0.4.44"
