@@ -53,6 +53,7 @@ pub fn calculate_julian_day(datetime: &DateTimeWithDUT1) -> f64 {
             + (f64::from(dt.minute()) + (seconds + datetime.dut1 - tz_offset_s) / 60.0) / 60.0)
             / 24.0;
 
+    // Compute JD using equation 4
     let julian_day: f64 = int::<f64>(365.25 * f64::from(year + 4716))
         + int::<f64>(30.6001 * f64::from(month + 1))
         + day_decimal
@@ -152,6 +153,41 @@ pub fn calculate_calendar_date_from_julian_day(
     let second = total_seconds % 60;
 
     tz.with_ymd_and_hms(year, month, day, hour, minute, second)
+}
+
+/// Computes the Julian Ephemeris Day (JDE) from the given Julian Day (JD)
+/// and ΔT (`delta_t`) expressed in seconds.
+///
+/// Refer to section 3.1.2.
+#[must_use]
+pub const fn calculate_julian_ephemeris_day(julian_day: f64, delta_t: f64) -> f64 {
+    julian_day + delta_t / 86400.0 // Equation 5
+}
+
+/// Computes the Julian Century (JC) from the given Julian Day (JD)
+/// for the 2000 standard epoch.
+///
+/// Refer to section 3.1.3.
+#[must_use]
+pub const fn calculate_julian_century(julian_day: f64) -> f64 {
+    (julian_day - 2_451_545.0) / 36_525.0 // Equation 6
+}
+
+/// Computes the Julian Ephemeris Century (JCE) from the given Julian Ephemeris Day (JDE)
+/// for the 2000 standard epoch.
+///
+/// Refer to section 3.1.3.
+#[must_use]
+pub const fn calculate_julian_ephemeris_century(julian_ephemeris_day: f64) -> f64 {
+    (julian_ephemeris_day - 2_451_545.0) / 36_525.0 // Equation 7
+}
+
+/// Computes the Julian Ephemeris Millennium (JME) from the given Julian Ephemeris Century (JCE) for the 2000 standard epoch.
+///
+/// Refer to section 3.1.4.
+#[must_use]
+pub const fn calculate_julian_ephemeris_millennium(julian_ephemeris_century: f64) -> f64 {
+    julian_ephemeris_century / 10.0 // Equation 8
 }
 
 #[cfg(test)]
