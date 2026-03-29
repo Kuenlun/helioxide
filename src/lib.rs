@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #![cfg_attr(test, feature(coverage_attribute))]
+#![feature(const_trait_impl)]
 
 pub mod error;
 pub mod helper;

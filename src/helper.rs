@@ -17,12 +17,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 /// Enables conversion from an `f64` by extracting its integer component.
-pub trait FromTruncatedF64 {
+pub const trait FromTruncatedF64 {
     /// Constructs `Self` by truncating the fractional part towards zero.
     fn from_truncated(val: f64) -> Self;
 }
 
-impl FromTruncatedF64 for f64 {
+impl const FromTruncatedF64 for f64 {
     /// Retains the integer component as an `f64`, discarding the fraction.
     #[inline]
     fn from_truncated(val: f64) -> Self {
@@ -30,7 +30,7 @@ impl FromTruncatedF64 for f64 {
     }
 }
 
-impl FromTruncatedF64 for i32 {
+impl const FromTruncatedF64 for i32 {
     /// Converts to an `i32` by truncating the value towards zero.
     #[allow(clippy::cast_possible_truncation)] // Truncation is intentional
     #[inline]
@@ -56,7 +56,7 @@ impl FromTruncatedF64 for i32 {
 /// ```
 #[inline]
 #[must_use]
-pub fn int<T: FromTruncatedF64>(x: f64) -> T {
+pub const fn int<T: const FromTruncatedF64>(x: f64) -> T {
     T::from_truncated(x)
 }
 
