@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use chrono::Utc;
 use chrono_tz::Tz;
-use helioxide::{DateTimeWithDUT1, calculate_julian_day};
+use helioxide::{DateTimeWithDUT1, julian::calculate_julian_day};
 use log::{debug, info};
 
 fn main() {
