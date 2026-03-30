@@ -17,7 +17,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 use chrono::{DateTime, Datelike, TimeZone, Timelike};
-use chrono_tz::{OffsetComponents, Tz};
+use chrono::{Offset, Utc};
+use chrono_tz::Tz;
 
 use crate::DateTimeWithDUT1;
 use crate::helper::int;
@@ -38,7 +39,8 @@ use crate::helper::int;
 /// ```
 #[must_use]
 pub fn calculate_julian_day(datetime: &DateTimeWithDUT1) -> f64 {
-    // Computes equation 4 from the decimal day and the year/month pair normalized for January and February.
+    /// Computes equation 4 from the decimal day and the year/month pair normalized for January and February.
+    #[must_use]
     const fn compute_julian_day_private(day_decimal: f64, year: f64, month: f64) -> f64 {
         let julian_day: f64 = int::<f64>(365.25 * (year + 4716.0))
             + int::<f64>(30.6001 * (month + 1.0))
@@ -61,9 +63,9 @@ pub fn calculate_julian_day(datetime: &DateTimeWithDUT1) -> f64 {
     let dt = &datetime.datetime;
 
     let seconds = f64::from(dt.second()) + (f64::from(dt.nanosecond()) / 1_000_000_000.0);
-    let tz_offset_s = dt.offset().base_utc_offset().as_seconds_f64();
+    let tz_offset_s = f64::from(dt.offset().fix().local_minus_utc());
 
-    // Express the civil date as a decimal day after applying DUT1 and the base UTC offset.
+    // Express the civil date as a decimal day after applying DUT1 and the effective UTC offset.
     let day_decimal = f64::from(dt.day())
         + (f64::from(dt.hour())
             + (f64::from(dt.minute()) + (seconds + datetime.dut1 - tz_offset_s) / 60.0) / 60.0)
@@ -95,71 +97,76 @@ pub fn calculate_julian_day(datetime: &DateTimeWithDUT1) -> f64 {
 /// println!("Calendar date for Julian Day {}: {}", julian_day, datetime);
 /// ```
 #[must_use]
-#[allow(clippy::many_single_char_names)] // Keep single-letter names to mirror NREL SPA notation
 pub fn calculate_calendar_date_from_julian_day(
     julian_day: f64,
     tz: Tz,
 ) -> chrono::MappedLocalTime<DateTime<Tz>> {
-    // A.3.1. Add 0.5 to the Julian Day (JD), then record the integer of the result as Z, and the fraction decimal as F.
-    let tz_offset_days = tz
-        .offset_from_utc_datetime(&chrono::DateTime::UNIX_EPOCH.naive_utc())
-        .base_utc_offset()
-        .as_seconds_f64()
-        / 86_400.0;
-    let jd = julian_day + 0.5 + tz_offset_days;
-    let z = int::<f64>(jd);
-    let f = jd - z;
+    #[must_use]
+    #[allow(clippy::many_single_char_names)] // Keep single-letter names to mirror NREL SPA notation
+    const fn calculate_calendar_date_from_julian_day_private(
+        julian_day: f64,
+    ) -> (i32, u32, u32, u32, u32, u32) {
+        // A.3.1. Add 0.5 to the Julian Day (JD), then record the integer of the result as Z, and the fraction decimal as F.
+        let jd = julian_day + 0.5;
+        let z = int::<f64>(jd);
+        let f = jd - z;
 
-    // A.3.2. If Z is less than 2299161, then record A equals Z. Else, calculate the term B
-    let a = if z < 2_299_161.0 {
-        z
-    } else {
-        let b = int::<f64>((z - 1_867_216.25) / 36_524.25); // A15
-        z + 1.0 + b - int::<f64>(b / 4.0) // A16
-    };
+        // A.3.2. If Z is less than 2299161, then record A equals Z. Else, calculate the term B
+        let a = if z < 2_299_161.0 {
+            z
+        } else {
+            let b = int::<f64>((z - 1_867_216.25) / 36_524.25); // A15
+            z + 1.0 + b - int::<f64>(b / 4.0) // A16
+        };
 
-    // A.3.3. Calculate the term C
-    let c = a + 1524.0; // A17
+        // A.3.3. Calculate the term C
+        let c = a + 1524.0; // A17
 
-    // A.3.4. Calculate the term D
-    let d = int::<f64>((c - 122.1) / 365.25); // A18
+        // A.3.4. Calculate the term D
+        let d = int::<f64>((c - 122.1) / 365.25); // A18
 
-    // A.3.5. Calculate the term G
-    let g = int::<f64>(365.25 * d); // A19
+        // A.3.5. Calculate the term G
+        let g = int::<f64>(365.25 * d); // A19
 
-    // A.3.6. Calculate the term I
-    let i = int::<f64>((c - g) / 30.6001); // A20
+        // A.3.6. Calculate the term I
+        let i = int::<f64>((c - g) / 30.6001); // A20
 
-    // A.3.7. Calculate the day number of the month with decimals
-    let day_decimal = c - g - int::<f64>(30.6001 * i) + f; // A21
+        // A.3.7. Calculate the day number of the month with decimals
+        let day_decimal = c - g - int::<f64>(30.6001 * i) + f; // A21
 
-    // A.3.8. Calculate the month number (A22)
-    let month = if int::<i32>(i) < 14 {
-        int::<i32>(i).cast_unsigned() - 1
-    } else {
-        int::<i32>(i).cast_unsigned() - 13
-    };
+        // A.3.8. Calculate the month number (A22)
+        let month = if int::<i32>(i) < 14 {
+            int::<i32>(i).cast_unsigned() - 1
+        } else {
+            int::<i32>(i).cast_unsigned() - 13
+        };
 
-    // A.3.8. Calculate the month number (A23)
-    let year = if month > 2 {
-        int::<i32>(d) - 4716
-    } else {
-        int::<i32>(d) - 4715
-    };
+        // A.3.8. Calculate the month number (A23)
+        let year = if month > 2 {
+            int::<i32>(d) - 4716
+        } else {
+            int::<i32>(d) - 4715
+        };
 
-    let day = int::<i32>(day_decimal).cast_unsigned();
-    let day_fraction = day_decimal - int::<f64>(day_decimal);
+        let day = int::<i32>(day_decimal).cast_unsigned();
+        let day_fraction = day_decimal - int::<f64>(day_decimal);
 
-    // Convert the fractional day into total seconds.
-    // Rounding prevents floating-point precision issues from dropping a second.
-    let total_seconds = int::<i32>((day_fraction * 86_400.0).round()).cast_unsigned();
+        // Convert the fractional day into total seconds.
+        // Rounding prevents floating-point precision issues from dropping a second.
+        let total_seconds = int::<i32>((day_fraction * 86_400.0).round()).cast_unsigned();
 
-    // Extract time components using standard integer arithmetic
-    let hour = total_seconds / 3600;
-    let minute = (total_seconds % 3600) / 60;
-    let second = total_seconds % 60;
+        // Extract time components using standard integer arithmetic
+        let hour = total_seconds / 3600;
+        let minute = (total_seconds % 3600) / 60;
+        let second = total_seconds % 60;
+        (year, month, day, hour, minute, second)
+    }
 
-    tz.with_ymd_and_hms(year, month, day, hour, minute, second)
+    let (year, month, day, hour, minute, second) =
+        calculate_calendar_date_from_julian_day_private(julian_day);
+
+    Utc.with_ymd_and_hms(year, month, day, hour, minute, second)
+        .map(|datetime| datetime.with_timezone(&tz))
 }
 
 /// Computes the Julian Ephemeris Day (JDE) from the given Julian Day (JD)
@@ -223,32 +230,32 @@ mod tests {
         (-4712, 1, 1, 12, 0, 0, 0.0),
     ];
 
-    /// Builds `(DateTime, expected_julian_day)` pairs from [`TABLE_A4_1`].
-    fn table_a4_1_cases() -> Vec<(DateTime<Tz>, f64)> {
-        TABLE_A4_1
-            .iter()
-            .map(|&(y, m, d, h, min, s, expected_jd)| {
-                let dt = chrono_tz::UTC
-                    .with_ymd_and_hms(y, m, d, h, min, s)
-                    .single()
-                    .unwrap_or_else(|| {
-                        panic!("Invalid test data: {y:04}-{m:02}-{d:02} {h:02}:{min:02}:{s:02}");
-                    });
-                (dt, expected_jd)
+    /// Reference local datetimes that span different effective UTC offsets.
+    /// Each entry: (year, month, day, hour, minute, second).
+    const LOCAL_TIME_CASES: [(i32, u32, u32, u32, u32, u32); 2] =
+        [(2026, 3, 15, 23, 41, 0), (2026, 3, 30, 23, 41, 0)];
+
+    /// Builds a [`DateTime<Tz>`] from its calendar components and timezone.
+    #[allow(clippy::many_single_char_names)]
+    fn build_datetime(tz: Tz, y: i32, m: u32, d: u32, h: u32, min: u32, s: u32) -> DateTime<Tz> {
+        tz.with_ymd_and_hms(y, m, d, h, min, s)
+            .single()
+            .unwrap_or_else(|| {
+                panic!("Invalid test data: {y:04}-{m:02}-{d:02} {h:02}:{min:02}:{s:02}");
             })
-            .collect()
     }
 
     /// Verifies that [`calculate_julian_day`] produces the expected Julian Day
     /// for every entry in Table A4.1.
     #[test]
     fn julian_day_from_datetime_matches_table_a4_1() {
-        for (dt, expected) in table_a4_1_cases() {
-            let actual = calculate_julian_day(&DateTimeWithDUT1::new(dt));
+        for &(y, m, d, h, min, s, expected_jd) in &TABLE_A4_1 {
+            let dt = build_datetime(chrono_tz::UTC, y, m, d, h, min, s);
+            let jd = calculate_julian_day(&DateTimeWithDUT1::new(dt));
 
             assert!(
-                (actual - expected).abs() < f64::EPSILON,
-                "Julian day mismatch for {dt}. Expected: {expected}, Got: {actual}"
+                (jd - expected_jd).abs() < f64::EPSILON,
+                "Julian day mismatch for {dt}. Expected: {expected_jd}, Got: {jd}"
             );
         }
     }
@@ -257,14 +264,72 @@ mod tests {
     /// original calendar date for every Julian Day in Table A4.1.
     #[test]
     fn calendar_date_round_trip_matches_table_a4_1() {
-        for (dt, expected_jd) in table_a4_1_cases() {
-            let recovered =
+        for &(y, m, d, h, min, s, expected_jd) in &TABLE_A4_1 {
+            let dt = build_datetime(chrono_tz::UTC, y, m, d, h, min, s);
+            let recovered_dt =
                 calculate_calendar_date_from_julian_day(expected_jd, chrono_tz::UTC).unwrap();
 
             assert!(
-                (recovered - dt).as_seconds_f64().abs() < f64::EPSILON,
-                "Calendar date mismatch for JD {expected_jd}. Expected: {dt}, Got: {recovered}"
+                (recovered_dt - dt).as_seconds_f64().abs() < f64::EPSILON,
+                "Calendar date mismatch for JD {expected_jd}. Expected: {dt}, Got: {recovered_dt}"
             );
+        }
+    }
+
+    /// Verifies that [`calculate_julian_day`] is invariant under equivalent
+    /// UTC and local representations across different effective UTC offsets.
+    #[test]
+    fn julian_day_is_timezone_invariant_across_local_offsets() {
+        let local_dts: Vec<DateTime<Tz>> = LOCAL_TIME_CASES
+            .iter()
+            .map(|&(y, m, d, h, min, s)| {
+                build_datetime(chrono_tz::Europe::Madrid, y, m, d, h, min, s)
+            })
+            .collect();
+
+        assert_ne!(
+            local_dts[0].offset().fix().local_minus_utc(),
+            local_dts[1].offset().fix().local_minus_utc(),
+            "Local timezone cases must cover different UTC offsets"
+        );
+
+        for local_dt in local_dts {
+            let utc_dt = local_dt.with_timezone(&chrono_tz::UTC);
+
+            let local_jd = calculate_julian_day(&DateTimeWithDUT1::new(local_dt));
+            let utc_jd = calculate_julian_day(&DateTimeWithDUT1::new(utc_dt));
+
+            assert!(
+                (local_jd - utc_jd).abs() < f64::EPSILON,
+                "Julian day must not depend on timezone representation. Local: {local_jd}, UTC: {utc_jd}"
+            );
+        }
+    }
+
+    /// Verifies that [`calculate_calendar_date_from_julian_day`] preserves the
+    /// local civil time across different effective UTC offsets.
+    #[test]
+    fn calendar_date_round_trip_preserves_local_time_across_offsets() {
+        let local_dts: Vec<DateTime<Tz>> = LOCAL_TIME_CASES
+            .iter()
+            .map(|&(y, m, d, h, min, s)| {
+                build_datetime(chrono_tz::Europe::Madrid, y, m, d, h, min, s)
+            })
+            .collect();
+
+        assert_ne!(
+            local_dts[0].offset().fix().local_minus_utc(),
+            local_dts[1].offset().fix().local_minus_utc(),
+            "Local timezone cases must cover different UTC offsets"
+        );
+
+        for local_dt in local_dts {
+            let julian_day = calculate_julian_day(&DateTimeWithDUT1::new(local_dt));
+            let recovered_dt =
+                calculate_calendar_date_from_julian_day(julian_day, chrono_tz::Europe::Madrid)
+                    .unwrap();
+
+            assert_eq!(recovered_dt, local_dt);
         }
     }
 }
