@@ -38,38 +38,45 @@ use crate::helper::int;
 /// ```
 #[must_use]
 pub fn calculate_julian_day(datetime: &DateTimeWithDUT1) -> f64 {
+    // Computes equation 4 from the decimal day and the year/month pair normalized for January and February.
+    const fn compute_julian_day_private(day_decimal: f64, year: f64, month: f64) -> f64 {
+        let julian_day: f64 = int::<f64>(365.25 * (year + 4716.0))
+            + int::<f64>(30.6001 * (month + 1.0))
+            + day_decimal
+            - 1524.5;
+
+        if julian_day > 2_299_160.0 {
+            // Gregorian calendar correction
+            let b = {
+                let a = int::<f64>(year / 100.0);
+                2.0 - a + int::<f64>(a / 4.0)
+            };
+            julian_day + b
+        } else {
+            // No correction for Julian calendar dates
+            julian_day
+        }
+    }
+
     let dt = &datetime.datetime;
 
+    let seconds = f64::from(dt.second()) + (f64::from(dt.nanosecond()) / 1_000_000_000.0);
+    let tz_offset_s = dt.offset().base_utc_offset().as_seconds_f64();
+
+    // Express the civil date as a decimal day after applying DUT1 and the base UTC offset.
+    let day_decimal = f64::from(dt.day())
+        + (f64::from(dt.hour())
+            + (f64::from(dt.minute()) + (seconds + datetime.dut1 - tz_offset_s) / 60.0) / 60.0)
+            / 24.0;
+
+    // Treat January and February as months 13 and 14 of the previous year for the JD formula.
     let (year, month) = if dt.month() < 3 {
         (dt.year() - 1, dt.month() + 12)
     } else {
         (dt.year(), dt.month())
     };
 
-    let seconds = f64::from(dt.second()) + (f64::from(dt.nanosecond()) / 1_000_000_000.0);
-    let tz_offset_s = dt.offset().base_utc_offset().as_seconds_f64();
-    let day_decimal = f64::from(dt.day())
-        + (f64::from(dt.hour())
-            + (f64::from(dt.minute()) + (seconds + datetime.dut1 - tz_offset_s) / 60.0) / 60.0)
-            / 24.0;
-
-    // Compute JD using equation 4
-    let julian_day: f64 = int::<f64>(365.25 * f64::from(year + 4716))
-        + int::<f64>(30.6001 * f64::from(month + 1))
-        + day_decimal
-        - 1524.5;
-
-    if julian_day > 2_299_160.0 {
-        // Gregorian calendar correction
-        let b = {
-            let a = int::<f64>(f64::from(year) / 100.0);
-            2.0 - a + int::<f64>(a / 4.0)
-        };
-        julian_day + b
-    } else {
-        // No correction for Julian calendar dates
-        julian_day
-    }
+    compute_julian_day_private(day_decimal, f64::from(year), f64::from(month))
 }
 
 /// Computes the calendar date corresponding to a given Julian Day, accounting for timezone corrections.
