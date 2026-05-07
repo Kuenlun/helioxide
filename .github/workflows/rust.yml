@@ -1,8 +1,6 @@
 name: Rust
 
 on:
-  push:
-    branches: ["master", "develop"]
   pull_request:
     branches: ["master", "develop"]
 
@@ -21,14 +19,16 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt, clippy
       - name: Install lockpick
-        run: cargo install --git https://github.com/Kuenlun/lockpick
+        uses: taiki-e/install-action@v2
+        with:
+          tool: lockpick,cargo-llvm-cov
       - name: Run checks
-        run: lockpick
+        run: lockpick -vvvv
 
   merge-gate:
     runs-on: ubuntu-latest
