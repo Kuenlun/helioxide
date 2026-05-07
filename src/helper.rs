@@ -61,7 +61,7 @@ pub const fn int<T: const FromTruncatedF64>(x: f64) -> T {
 }
 
 #[cfg(test)]
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     /// Verifies that `int::<i32>` truncates positive and negative values toward zero.

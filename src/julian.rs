@@ -205,7 +205,7 @@ pub const fn calculate_julian_ephemeris_millennium(julian_ephemeris_century: f64
 }
 
 #[cfg(test)]
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

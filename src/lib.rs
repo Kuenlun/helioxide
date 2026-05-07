@@ -16,7 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#![cfg_attr(test, feature(coverage_attribute))]
+// Allow `#[coverage(off)]` on test modules under `--cfg coverage_nightly` (nightly-only).
+#![cfg_attr(all(test, coverage_nightly), feature(coverage_attribute))]
 #![feature(const_trait_impl)]
 
 pub mod error;
