@@ -332,4 +332,43 @@ mod tests {
             assert_eq!(recovered_dt, local_dt);
         }
     }
+
+    /// Verifies that the derived Julian quantities honour the SPA constants
+    /// (J2000 epoch, century length, seconds per day, JME ratio).
+    /// Reference Julian Day taken from Table A5.1.
+    #[test]
+    fn julian_derived_quantities_pin_spa_constants() {
+        // JC vanishes at the J2000 epoch.
+        assert!(calculate_julian_century(2_451_545.0).abs() < f64::EPSILON);
+
+        // Advancing one Julian century (36_525 days) must shift JC by exactly 1.0.
+        assert!(
+            (calculate_julian_century(2_451_545.0 + 36_525.0) - 1.0).abs() < f64::EPSILON,
+            "Julian century length must be 36 525 days"
+        );
+
+        let jd = 2_452_930.312_847; // Table A5.1, 17 October 2003
+
+        // ΔT of one full day (86_400 s) must shift JDE by exactly one day.
+        assert!(
+            (calculate_julian_ephemeris_day(jd, 86_400.0) - jd - 1.0).abs() < f64::EPSILON,
+            "ΔT of one day must shift JDE by exactly one day"
+        );
+
+        // With ΔT equal to zero, JDE collapses to JD, so JCE must coincide with JC.
+        let jde = calculate_julian_ephemeris_day(jd, 0.0);
+        let jc = calculate_julian_century(jd);
+        let jce = calculate_julian_ephemeris_century(jde);
+        assert!(
+            (jc - jce).abs() < f64::EPSILON,
+            "JCE must use the same epoch and century length as JC"
+        );
+
+        // JME equals JCE divided by 10 by construction.
+        let jme = calculate_julian_ephemeris_millennium(jce);
+        assert!(
+            (jme * 10.0 - jce).abs() < f64::EPSILON,
+            "JME must equal JCE divided by 10"
+        );
+    }
 }
