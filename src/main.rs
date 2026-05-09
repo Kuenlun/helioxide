@@ -21,7 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use chrono::Utc;
 use chrono_tz::Tz;
-use helioxide::{DateTimeWithDUT1, julian};
+use helioxide::{SpaDateTime, julian};
 use log::{debug, info};
 
 fn main() {
@@ -31,7 +31,7 @@ fn main() {
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace")).init();
 
-    let now = DateTimeWithDUT1::new(Utc::now().with_timezone(&Tz::Europe__Madrid));
+    let now = SpaDateTime::new(Utc::now().with_timezone(&Tz::Europe__Madrid));
     info!("Now: {now:?}");
 
     let jd = julian::calculate_julian_day(&now);
