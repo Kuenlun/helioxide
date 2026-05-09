@@ -74,8 +74,10 @@ pub const fn int<T: const FromTruncatedF64>(x: f64) -> T {
 /// ```
 #[inline]
 #[must_use]
-pub fn limit_degrees(degrees: f64) -> f64 {
-    degrees.rem_euclid(360.0)
+pub const fn limit_degrees(degrees: f64) -> f64 {
+    // Equivalent to `degrees.rem_euclid(360.0)`; hand-rolled because the stdlib one isn't const yet.
+    let r = degrees % 360.0;
+    if r < 0.0 { r + 360.0 } else { r }
 }
 
 #[cfg(test)]

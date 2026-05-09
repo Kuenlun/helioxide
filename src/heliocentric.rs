@@ -372,28 +372,7 @@ mod tests {
         earth_heliocentric_latitude, earth_heliocentric_longitude, earth_radius_vector,
         evaluate_periodic_series, periodic_subseries_sum,
     };
-    use crate::SpaDateTime;
-    use crate::julian::{
-        calculate_julian_day, calculate_julian_ephemeris_century, calculate_julian_ephemeris_day,
-        calculate_julian_ephemeris_millennium,
-    };
-    use chrono::{TimeZone, Utc};
-
-    /// JME for the Table A5.1 worked example: 2003-10-17 12:30:30 LST, TZ = -7 h
-    /// (i.e. 19:30:30 UT) with ΔT = 67 s. The JD is reconstructed from the
-    /// civil instant rather than the report's 6-decimal printed value, because
-    /// the latter loses ~2·10⁻⁷ d that L1 ≈ 6·10¹¹ amplifies into the
-    /// trailing decimals of every published subseries total.
-    fn reference_jme() -> f64 {
-        let utc = Utc
-            .with_ymd_and_hms(2003, 10, 17, 19, 30, 30)
-            .single()
-            .expect("non-ambiguous reference instant");
-        let jd = calculate_julian_day(&SpaDateTime::new(utc));
-        let jde = calculate_julian_ephemeris_day(jd, 67.0);
-        let jce = calculate_julian_ephemeris_century(jde);
-        calculate_julian_ephemeris_millennium(jce)
-    }
+    use crate::test_fixtures::reference_jme;
 
     /// Reference subseries totals (the raw `Σ A·cos(B + C·JME)` values, before
     /// the JME-polynomial combination and the `1 / 10⁸` scaling), as published
