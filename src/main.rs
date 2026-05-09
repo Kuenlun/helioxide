@@ -21,7 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use chrono::Utc;
 use chrono_tz::Tz;
-use helioxide::{SpaDateTime, heliocentric, julian};
+use helioxide::{SpaDateTime, geocentric, heliocentric, julian};
 use log::{debug, info};
 
 fn main() {
@@ -51,4 +51,9 @@ fn main() {
     debug!("Earth heliocentric longitude L: {l}°");
     debug!("Earth heliocentric latitude B: {b}°");
     debug!("Earth radius vector R: {r} AU");
+
+    let theta = geocentric::geocentric_longitude(l);
+    let beta = geocentric::geocentric_latitude(b);
+    debug!("Sun geocentric longitude Θ: {theta}°");
+    debug!("Sun geocentric latitude β: {beta}°");
 }

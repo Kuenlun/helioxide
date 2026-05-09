@@ -21,9 +21,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #![feature(const_trait_impl)]
 
 pub mod error;
+pub mod geocentric;
 pub mod heliocentric;
 pub mod helper;
 pub mod julian;
 pub mod time;
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod test_fixtures;
 
 pub use time::{SpaDateTime, SpaTimeError};
