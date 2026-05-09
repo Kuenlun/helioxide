@@ -60,10 +60,29 @@ pub const fn int<T: const FromTruncatedF64>(x: f64) -> T {
     T::from_truncated(x)
 }
 
+/// Wraps a degree value into the half-open interval `[0°, 360°)`.
+///
+/// Refer to step 3.2.6.
+///
+/// # Examples
+///
+/// ```
+/// use helioxide::helper::limit_degrees;
+///
+/// let wrapped = limit_degrees(370.0);
+/// assert!((0.0..360.0).contains(&wrapped));
+/// ```
+#[inline]
+#[must_use]
+pub fn limit_degrees(degrees: f64) -> f64 {
+    degrees.rem_euclid(360.0)
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
     /// Verifies that `int::<i32>` truncates positive and negative values toward zero.
     #[test]
     fn test_int_truncates_towards_zero_i32() {
@@ -83,5 +102,30 @@ mod tests {
         assert_eq!(int::<f64>(-8.7), -8.0_f64);
         assert_eq!(int::<f64>(-8.2), -8.0_f64);
         assert_eq!(int::<f64>(0.0), 0.0_f64);
+    }
+
+    /// Pins the in-range identity: any value already inside `[0, 360)` must
+    /// pass through unchanged. The chosen inputs (0, 360, and a generic value)
+    /// are exactly representable in `f64`, so direct equality is meaningful.
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn limit_degrees_is_identity_inside_open_zero_360_interval() {
+        assert_eq!(limit_degrees(0.0), 0.0);
+        assert_eq!(limit_degrees(45.0), 45.0);
+        // Step 3.2.6 specifies a half-open interval, so 360° collapses to 0°.
+        assert_eq!(limit_degrees(360.0), 0.0);
+    }
+
+    /// Pins the wrap behaviour for over- and under-shoots, including values
+    /// that span multiple full revolutions. All operands are integers exactly
+    /// representable in `f64`, so the modular arithmetic is exact.
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn limit_degrees_wraps_into_zero_360_for_over_and_undershoots() {
+        assert_eq!(limit_degrees(370.0), 10.0);
+        assert_eq!(limit_degrees(720.0), 0.0);
+        assert_eq!(limit_degrees(-30.0), 330.0);
+        assert_eq!(limit_degrees(-720.0), 0.0);
+        assert_eq!(limit_degrees(-721.0), 359.0);
     }
 }

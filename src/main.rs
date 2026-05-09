@@ -21,7 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use chrono::Utc;
 use chrono_tz::Tz;
-use helioxide::{SpaDateTime, julian};
+use helioxide::{SpaDateTime, heliocentric, julian};
 use log::{debug, info};
 
 fn main() {
@@ -44,4 +44,11 @@ fn main() {
     debug!("Julian Century: {jc}");
     debug!("Julian Ephemeris Century: {jce}");
     debug!("Julian Ephemeris Millennium: {jme}");
+
+    let l = heliocentric::earth_heliocentric_longitude(jme);
+    let b = heliocentric::earth_heliocentric_latitude(jme);
+    let r = heliocentric::earth_radius_vector(jme);
+    debug!("Earth heliocentric longitude L: {l}°");
+    debug!("Earth heliocentric latitude B: {b}°");
+    debug!("Earth radius vector R: {r} AU");
 }

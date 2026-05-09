@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use std::process::Command;
 
 #[test]
-fn binary_runs_and_logs_julian_quantities() -> Result<(), Box<dyn std::error::Error>> {
+fn binary_runs_and_logs_expected_output_markers() -> Result<(), Box<dyn std::error::Error>> {
     let output = Command::new(env!("CARGO_BIN_EXE_helioxide"))
         .env("RUST_LOG", "trace")
         .output()?;
@@ -39,6 +39,9 @@ fn binary_runs_and_logs_julian_quantities() -> Result<(), Box<dyn std::error::Er
         "Julian Century:",
         "Julian Ephemeris Century:",
         "Julian Ephemeris Millennium:",
+        "Earth heliocentric longitude L:",
+        "Earth heliocentric latitude B:",
+        "Earth radius vector R:",
     ] {
         assert!(
             stderr.contains(marker),
