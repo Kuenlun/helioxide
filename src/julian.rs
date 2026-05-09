@@ -16,14 +16,13 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use chrono::{DateTime, Datelike, TimeZone, Timelike};
-use chrono::{Offset, Utc};
+use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
 
-use crate::DateTimeWithDUT1;
+use crate::SpaDateTime;
 use crate::helper::int;
 
-/// Computes the Julian Day for the provided datetime, accounting for DUT1 and timezone corrections.
+/// Computes the Julian Day from the input datetime, read in UT by collapsing the timezone to UTC and adding DUT1.
 ///
 /// Refer to section 3.1.1.
 ///
@@ -32,13 +31,13 @@ use crate::helper::int;
 /// ```
 /// use chrono::Utc;
 /// use chrono_tz::Tz;
-/// use helioxide::{DateTimeWithDUT1, julian::calculate_julian_day};
+/// use helioxide::{SpaDateTime, julian::calculate_julian_day};
 ///
-/// let now = DateTimeWithDUT1::new(Utc::now().with_timezone(&Tz::Europe__Madrid));
+/// let now = SpaDateTime::new(Utc::now().with_timezone(&Tz::Europe__Madrid));
 /// println!("Julian Day for now: {}", calculate_julian_day(&now));
 /// ```
 #[must_use]
-pub fn calculate_julian_day(datetime: &DateTimeWithDUT1) -> f64 {
+pub fn calculate_julian_day<Tz: TimeZone>(datetime: &SpaDateTime<Tz>) -> f64 {
     /// Computes equation 4 from the decimal day and the year/month pair normalized for January and February.
     #[must_use]
     const fn compute_julian_day_private(day_decimal: f64, year: f64, month: f64) -> f64 {
@@ -60,15 +59,14 @@ pub fn calculate_julian_day(datetime: &DateTimeWithDUT1) -> f64 {
         }
     }
 
-    let dt = &datetime.datetime;
+    // JD is defined in UT, so read calendar fields from the UTC instant rather than the input timezone.
+    let dt = datetime.datetime().naive_utc();
 
-    let seconds = f64::from(dt.second()) + (f64::from(dt.nanosecond()) / 1_000_000_000.0);
-    let tz_offset_s = f64::from(dt.offset().fix().local_minus_utc());
+    let seconds = f64::from(dt.second()) + f64::from(dt.nanosecond()) / 1_000_000_000.0;
 
-    // Express the civil date as a decimal day after applying DUT1 and the effective UTC offset.
     let day_decimal = f64::from(dt.day())
         + (f64::from(dt.hour())
-            + (f64::from(dt.minute()) + (seconds + datetime.dut1 - tz_offset_s) / 60.0) / 60.0)
+            + (f64::from(dt.minute()) + (seconds + datetime.dut1()) / 60.0) / 60.0)
             / 24.0;
 
     // Treat January and February as months 13 and 14 of the previous year for the JD formula.
@@ -208,6 +206,7 @@ pub const fn calculate_julian_ephemeris_millennium(julian_ephemeris_century: f64
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use chrono::Offset;
 
     /// Reference data from Table A4.1.
     /// Each entry: (year, month, day, hour, minute, second, `expected_julian_day`).
@@ -251,7 +250,7 @@ mod tests {
     fn julian_day_from_datetime_matches_table_a4_1() {
         for &(y, m, d, h, min, s, expected_jd) in &TABLE_A4_1 {
             let dt = build_datetime(chrono_tz::UTC, y, m, d, h, min, s);
-            let jd = calculate_julian_day(&DateTimeWithDUT1::new(dt));
+            let jd = calculate_julian_day(&SpaDateTime::new(dt));
 
             assert!(
                 (jd - expected_jd).abs() < f64::EPSILON,
@@ -296,8 +295,8 @@ mod tests {
         for local_dt in local_dts {
             let utc_dt = local_dt.with_timezone(&chrono_tz::UTC);
 
-            let local_jd = calculate_julian_day(&DateTimeWithDUT1::new(local_dt));
-            let utc_jd = calculate_julian_day(&DateTimeWithDUT1::new(utc_dt));
+            let local_jd = calculate_julian_day(&SpaDateTime::new(local_dt));
+            let utc_jd = calculate_julian_day(&SpaDateTime::new(utc_dt));
 
             assert!(
                 (local_jd - utc_jd).abs() < f64::EPSILON,
@@ -324,7 +323,7 @@ mod tests {
         );
 
         for local_dt in local_dts {
-            let julian_day = calculate_julian_day(&DateTimeWithDUT1::new(local_dt));
+            let julian_day = calculate_julian_day(&SpaDateTime::new(local_dt));
             let recovered_dt =
                 calculate_calendar_date_from_julian_day(julian_day, chrono_tz::Europe::Madrid)
                     .unwrap();

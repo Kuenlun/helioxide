@@ -23,22 +23,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 pub mod error;
 pub mod helper;
 pub mod julian;
+pub mod time;
 
-use chrono::DateTime;
-use chrono_tz::Tz;
-
-#[derive(Debug)]
-pub struct DateTimeWithDUT1 {
-    datetime: DateTime<Tz>,
-    dut1: f64,
-}
-
-impl DateTimeWithDUT1 {
-    #[must_use]
-    pub const fn new(datetime: DateTime<Tz>) -> Self {
-        Self {
-            datetime,
-            dut1: 0.0,
-        }
-    }
-}
+pub use time::{SpaDateTime, SpaTimeError};
