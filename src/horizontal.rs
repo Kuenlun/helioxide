@@ -309,73 +309,10 @@ mod tests {
         topocentric_azimuth_angle, topocentric_elevation_without_refraction,
         topocentric_zenith_angle,
     };
-    use crate::apparent::{aberration_correction, apparent_sun_longitude};
-    use crate::equatorial::{geocentric_declination, geocentric_right_ascension};
-    use crate::geocentric::{geocentric_latitude, geocentric_longitude};
-    use crate::heliocentric::{
-        earth_heliocentric_latitude, earth_heliocentric_longitude, earth_radius_vector,
-    };
-    use crate::hour_angle::{observer_local_hour_angle, topocentric_local_hour_angle};
-    use crate::nutation::nutation_in_longitude_and_obliquity;
-    use crate::obliquity::true_obliquity_of_ecliptic;
-    use crate::parallax::{equatorial_horizontal_parallax, topocentric_equatorial_coordinates};
-    use crate::sidereal::{apparent_sidereal_time, mean_sidereal_time};
     use crate::test_fixtures::{
-        REFERENCE_ELEVATION_METRES, REFERENCE_LATITUDE_DEGREES, REFERENCE_LONGITUDE_DEGREES,
-        reference_jce, reference_jd, reference_jme,
+        REFERENCE_LATITUDE_DEGREES, REFERENCE_PRESSURE_MILLIBARS, REFERENCE_TEMPERATURE_CELSIUS,
+        reference_delta_prime_and_h_prime, reference_elevation_without_refraction,
     };
-
-    /// Reference observer pressure for the Table A5.1 worked example
-    /// (millibars), per section A.5.
-    const REFERENCE_PRESSURE_MILLIBARS: f64 = 820.0;
-    /// Reference observer temperature for the Table A5.1 worked example
-    /// (degrees Celsius), per section A.5.
-    const REFERENCE_TEMPERATURE_CELSIUS: f64 = 11.0;
-
-    /// Drives the full upstream chain to produce `(δ', H')` at the
-    /// Table A5.1 reference instant. Pinning the pair together lets every
-    /// downstream reference test surface a regression on either input in
-    /// exactly one place.
-    fn reference_delta_prime_and_h_prime() -> (f64, f64) {
-        let jd = reference_jd();
-        let jce = reference_jce();
-        let jme = reference_jme();
-
-        let (delta_psi, delta_epsilon) = nutation_in_longitude_and_obliquity(jce);
-        let epsilon = true_obliquity_of_ecliptic(jme, delta_epsilon);
-        let nu = apparent_sidereal_time(mean_sidereal_time(jd), delta_psi, epsilon);
-
-        let theta = geocentric_longitude(earth_heliocentric_longitude(jme));
-        let beta = geocentric_latitude(earth_heliocentric_latitude(jme));
-        let r = earth_radius_vector(jme);
-        let delta_tau = aberration_correction(r);
-        let lambda = apparent_sun_longitude(theta, delta_psi, delta_tau);
-
-        let alpha = geocentric_right_ascension(lambda, beta, epsilon);
-        let delta = geocentric_declination(lambda, beta, epsilon);
-        let h = observer_local_hour_angle(nu, REFERENCE_LONGITUDE_DEGREES, alpha);
-        let xi = equatorial_horizontal_parallax(r);
-        let topocentric = topocentric_equatorial_coordinates(
-            alpha,
-            delta,
-            h,
-            xi,
-            REFERENCE_LATITUDE_DEGREES,
-            REFERENCE_ELEVATION_METRES,
-        );
-        let h_prime = topocentric_local_hour_angle(h, topocentric.parallax_in_right_ascension);
-
-        (topocentric.declination, h_prime)
-    }
-
-    /// Drives the full upstream chain plus equation 41 to produce `e₀` at
-    /// the Table A5.1 reference instant. Reused by the refraction, zenith,
-    /// and reference-θ tests so that a single integration regression
-    /// upstream surfaces in exactly one place.
-    fn reference_elevation_without_refraction() -> f64 {
-        let (delta_prime, h_prime) = reference_delta_prime_and_h_prime();
-        topocentric_elevation_without_refraction(REFERENCE_LATITUDE_DEGREES, delta_prime, h_prime)
-    }
 
     /// `θ` at the Table A5.1 reference instant must reproduce the
     /// published `50.11162°`. Failure is a global integration red flag:

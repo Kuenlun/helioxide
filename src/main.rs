@@ -22,8 +22,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use chrono::Utc;
 use chrono_tz::Tz;
 use helioxide::{
-    SpaDateTime, apparent, equatorial, geocentric, heliocentric, horizontal, hour_angle, julian,
-    nutation, obliquity, parallax, sidereal,
+    SpaDateTime, apparent, equatorial, geocentric, heliocentric, horizontal, hour_angle, incidence,
+    julian, nutation, obliquity, parallax, sidereal,
 };
 use log::{debug, info};
 
@@ -41,6 +41,10 @@ fn main() {
     // Annual averages used by equation 42's atmospheric refraction model.
     const OBSERVER_PRESSURE_MBAR: f64 = 1015.0;
     const OBSERVER_TEMPERATURE_C: f64 = 18.0;
+    // Example surface orientation for section 3.16: a fixed-tilt solar panel
+    // tilted at the observer's latitude, facing due south (γ = 0°).
+    const SURFACE_SLOPE_DEG: f64 = OBSERVER_LATITUDE_DEG;
+    const SURFACE_AZIMUTH_ROTATION_DEG: f64 = 0.0;
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace")).init();
 
@@ -138,4 +142,12 @@ fn main() {
     debug!("Topocentric astronomers' azimuth Γ: {gamma}°");
     let azimuth = horizontal::topocentric_azimuth_angle(gamma);
     info!("Topocentric azimuth Φ: {azimuth}°");
+
+    let incidence_angle = incidence::surface_incidence_angle(
+        zenith,
+        gamma,
+        SURFACE_SLOPE_DEG,
+        SURFACE_AZIMUTH_ROTATION_DEG,
+    );
+    info!("Surface incidence angle I: {incidence_angle}°");
 }

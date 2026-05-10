@@ -28,6 +28,7 @@ pub mod heliocentric;
 pub mod helper;
 pub mod horizontal;
 pub mod hour_angle;
+pub mod incidence;
 pub mod julian;
 pub mod nutation;
 pub mod obliquity;
