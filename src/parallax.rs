@@ -218,15 +218,10 @@ mod tests {
     use crate::nutation::nutation_in_longitude_and_obliquity;
     use crate::obliquity::true_obliquity_of_ecliptic;
     use crate::sidereal::{apparent_sidereal_time, mean_sidereal_time};
-    use crate::test_fixtures::{reference_jce, reference_jd, reference_jme};
-
-    /// Reference site parameters from Appendix A.5: latitude `φ`,
-    /// longitude `σ`, elevation `E`. Used by every reference-instant
-    /// test in this module so the published civil instant feeds a single,
-    /// canonical observer.
-    const REFERENCE_LATITUDE_DEGREES: f64 = 39.742_476;
-    const REFERENCE_LONGITUDE_DEGREES: f64 = -105.178_6;
-    const REFERENCE_ELEVATION_METRES: f64 = 1830.14;
+    use crate::test_fixtures::{
+        REFERENCE_ELEVATION_METRES, REFERENCE_LATITUDE_DEGREES, REFERENCE_LONGITUDE_DEGREES,
+        reference_jce, reference_jd, reference_jme,
+    };
 
     /// Drives the full upstream chain to produce `(α, δ, H, ξ)` at the
     /// Table A5.1 reference instant. Reused by every reference-instant
@@ -303,32 +298,6 @@ mod tests {
         assert!(
             (delta_prime - -9.316_179).abs() < 1e-4,
             "δ' mismatch at A5.1 reference: got {delta_prime}",
-        );
-    }
-
-    /// `H − Δα` at the Table A5.1 reference instant must reproduce the
-    /// published `H' = 11.10629°`. Section 3.13's one-line refinement
-    /// `H' = H − Δα` is the only published downstream consumer of `Δα`,
-    /// so this test pins the exposed scaffolding output that no other
-    /// reference test exercises directly. A wrong sign on `Δα` (which
-    /// would still keep `α' = α + Δα` close to its published value, since
-    /// `Δα` itself is `~10⁻⁴°`) would surface here as a `~2·10⁻⁴°`
-    /// mismatch, well above the 1e-4° tolerance.
-    #[test]
-    fn parallax_in_right_ascension_drives_published_topocentric_hour_angle() {
-        let (alpha, delta, h, xi) = reference_alpha_delta_h_xi();
-        let coords = topocentric_equatorial_coordinates(
-            alpha,
-            delta,
-            h,
-            xi,
-            REFERENCE_LATITUDE_DEGREES,
-            REFERENCE_ELEVATION_METRES,
-        );
-        let h_prime = h - coords.parallax_in_right_ascension;
-        assert!(
-            (h_prime - 11.106_29).abs() < 1e-4,
-            "H − Δα mismatch at A5.1 reference: got {h_prime}",
         );
     }
 

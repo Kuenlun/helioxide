@@ -54,6 +54,11 @@ fn binary_runs_and_logs_expected_output_markers() -> Result<(), Box<dyn std::err
         "Sun geocentric right ascension α:",
         "Sun geocentric declination δ:",
         "Observer local hour angle H:",
+        "Sun equatorial horizontal parallax ξ:",
+        "Sun right ascension parallax Δα:",
+        "Topocentric sun right ascension α':",
+        "Topocentric sun declination δ':",
+        "Topocentric local hour angle H':",
     ] {
         assert!(
             stderr.contains(marker),
