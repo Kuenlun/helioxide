@@ -23,7 +23,7 @@ use chrono::Utc;
 use chrono_tz::Tz;
 use helioxide::{
     SpaDateTime, apparent, equatorial, geocentric, heliocentric, hour_angle, julian, nutation,
-    obliquity, sidereal,
+    obliquity, parallax, sidereal,
 };
 use log::{debug, info};
 
@@ -32,9 +32,12 @@ fn main() {
     // Update this value as needed for more accurate calculations.
     const DELTA_T: f64 = 69.5;
 
-    // Observer geographical longitude σ (degrees), positive east of
-    // Greenwich per section 3.11. Alicante (~38.34602°N, 0.49068°W).
+    // Example observer site: Alicante. Longitude is signed positive east of
+    // Greenwich per section 3.11; latitude is signed positive north of the
+    // equator per section 3.12.2; elevation is above sea level per section 3.12.3.
     const OBSERVER_LONGITUDE_DEG: f64 = -0.490_68;
+    const OBSERVER_LATITUDE_DEG: f64 = 38.346_02;
+    const OBSERVER_ELEVATION_M: f64 = 3.0;
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace")).init();
 
@@ -88,4 +91,27 @@ fn main() {
 
     let h = hour_angle::observer_local_hour_angle(nu, OBSERVER_LONGITUDE_DEG, alpha);
     debug!("Observer local hour angle H: {h}°");
+
+    let xi = parallax::equatorial_horizontal_parallax(r);
+    debug!("Sun equatorial horizontal parallax ξ: {xi}°");
+    let topocentric = parallax::topocentric_equatorial_coordinates(
+        alpha,
+        delta,
+        h,
+        xi,
+        OBSERVER_LATITUDE_DEG,
+        OBSERVER_ELEVATION_M,
+    );
+    debug!(
+        "Sun right ascension parallax Δα: {}°",
+        topocentric.parallax_in_right_ascension,
+    );
+    debug!(
+        "Topocentric sun right ascension α': {}°",
+        topocentric.right_ascension,
+    );
+    debug!(
+        "Topocentric sun declination δ': {}°",
+        topocentric.declination,
+    );
 }

@@ -30,6 +30,7 @@ pub mod hour_angle;
 pub mod julian;
 pub mod nutation;
 pub mod obliquity;
+pub mod parallax;
 pub mod sidereal;
 pub mod time;
 
