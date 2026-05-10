@@ -21,7 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use chrono::Utc;
 use chrono_tz::Tz;
-use helioxide::{SpaDateTime, geocentric, heliocentric, julian};
+use helioxide::{SpaDateTime, geocentric, heliocentric, julian, nutation};
 use log::{debug, info};
 
 fn main() {
@@ -56,4 +56,8 @@ fn main() {
     let beta = geocentric::geocentric_latitude(b);
     debug!("Sun geocentric longitude Θ: {theta}°");
     debug!("Sun geocentric latitude β: {beta}°");
+
+    let (delta_psi, delta_epsilon) = nutation::nutation_in_longitude_and_obliquity(jce);
+    debug!("Nutation in longitude Δψ: {delta_psi}°");
+    debug!("Nutation in obliquity Δε: {delta_epsilon}°");
 }
