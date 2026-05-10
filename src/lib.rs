@@ -26,6 +26,7 @@ pub mod error;
 pub mod geocentric;
 pub mod heliocentric;
 pub mod helper;
+pub mod hour_angle;
 pub mod julian;
 pub mod nutation;
 pub mod obliquity;

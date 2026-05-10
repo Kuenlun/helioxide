@@ -22,8 +22,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use chrono::Utc;
 use chrono_tz::Tz;
 use helioxide::{
-    SpaDateTime, apparent, equatorial, geocentric, heliocentric, julian, nutation, obliquity,
-    sidereal,
+    SpaDateTime, apparent, equatorial, geocentric, heliocentric, hour_angle, julian, nutation,
+    obliquity, sidereal,
 };
 use log::{debug, info};
 
@@ -31,6 +31,10 @@ fn main() {
     // Approximate ΔT value in seconds for years around 2026.
     // Update this value as needed for more accurate calculations.
     const DELTA_T: f64 = 69.5;
+
+    // Observer geographical longitude σ (degrees), positive east of
+    // Greenwich per section 3.11. Alicante (~38.34602°N, 0.49068°W).
+    const OBSERVER_LONGITUDE_DEG: f64 = -0.490_68;
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace")).init();
 
@@ -81,4 +85,7 @@ fn main() {
     debug!("Sun geocentric right ascension α: {alpha}°");
     let delta = equatorial::geocentric_declination(lambda, beta, epsilon);
     debug!("Sun geocentric declination δ: {delta}°");
+
+    let h = hour_angle::observer_local_hour_angle(nu, OBSERVER_LONGITUDE_DEG, alpha);
+    debug!("Observer local hour angle H: {h}°");
 }
