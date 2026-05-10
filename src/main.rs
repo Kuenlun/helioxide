@@ -4,7 +4,7 @@
 
 use chrono::Utc;
 use chrono_tz::Tz;
-use helioxide::{Observer, SolarPosition, SpaDateTime, Surface};
+use helioxide::{Observer, SolarDay, SolarPosition, SpaDateTime, Surface};
 
 /// Approximate ΔT value in seconds for years around 2026. Update as
 /// needed for more accurate calculations (consult IERS bulletins).
@@ -27,8 +27,14 @@ const SURFACE: Surface = Surface {
 };
 
 fn main() {
+    // The input timezone selects both the local civil day that drives
+    // `SolarDay::compute` and the wall clock used to render its output.
+    // Alicante is the observer, so Europe/Madrid keeps sunrise, transit
+    // and sunset on the same calendar date as Alicante's clock.
     let now = SpaDateTime::new(Utc::now().with_timezone(&Tz::Europe__Madrid));
     let position = SolarPosition::compute(&now, DELTA_T, OBSERVER, SURFACE);
+    let day = SolarDay::compute(&now, DELTA_T, OBSERVER);
     println!("Now: {now:?}");
     println!("{position}");
+    println!("{day}");
 }

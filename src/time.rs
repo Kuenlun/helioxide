@@ -82,6 +82,22 @@ impl<Tz: TimeZone> SpaDateTime<Tz> {
     pub const fn dut1(&self) -> f64 {
         self.dut1
     }
+
+    /// Retargets the wall-clock instant while keeping DUT1.
+    ///
+    /// DUT1 is not revalidated: every path that mutates `dut1` runs
+    /// through [`SpaDateTime::try_with_dut1`], so `self`'s value is
+    /// already known to satisfy the IERS bound.
+    #[must_use]
+    pub const fn with_datetime<NewTz: TimeZone>(
+        &self,
+        datetime: DateTime<NewTz>,
+    ) -> SpaDateTime<NewTz> {
+        SpaDateTime {
+            datetime,
+            dut1: self.dut1,
+        }
+    }
 }
 
 impl<Tz: TimeZone> From<DateTime<Tz>> for SpaDateTime<Tz> {
@@ -181,5 +197,26 @@ mod tests {
             SpaDateTime::try_new(dt(), f64::NAN),
             Err(SpaTimeError::Dut1OutOfRange(_))
         ));
+    }
+
+    /// Pins the contract of `with_datetime`: DUT1 is preserved
+    /// bit-for-bit and the datetime is swapped. Direct f64 equality
+    /// is safe because the same bit pattern flows through the copy.
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn with_datetime_preserves_dut1_and_swaps_wall_clock_instant() {
+        let original = SpaDateTime::try_new(dt(), 0.25).expect("DUT1 in (-1, 1) must validate");
+        let new_instant = Utc.with_ymd_and_hms(2030, 1, 2, 3, 4, 5).unwrap();
+        let retargeted = original.with_datetime(new_instant);
+        assert_eq!(
+            retargeted.dut1(),
+            0.25,
+            "with_datetime must preserve DUT1 verbatim",
+        );
+        assert_eq!(
+            retargeted.datetime(),
+            &new_instant,
+            "with_datetime must swap the wall-clock instant",
+        );
     }
 }

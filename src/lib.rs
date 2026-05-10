@@ -21,6 +21,7 @@ pub mod nutation;
 pub mod obliquity;
 pub mod parallax;
 pub mod sidereal;
+pub mod solar_time;
 pub mod spa;
 pub mod time;
 
@@ -28,5 +29,6 @@ pub mod time;
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test_fixtures;
 
+pub use solar_time::SolarDay;
 pub use spa::{Observer, SolarPosition, Surface};
 pub use time::{SpaDateTime, SpaTimeError};
