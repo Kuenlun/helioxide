@@ -21,7 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use chrono::Utc;
 use chrono_tz::Tz;
-use helioxide::{SpaDateTime, geocentric, heliocentric, julian, nutation, obliquity};
+use helioxide::{SpaDateTime, apparent, geocentric, heliocentric, julian, nutation, obliquity};
 use log::{debug, info};
 
 fn main() {
@@ -63,4 +63,9 @@ fn main() {
 
     let epsilon = obliquity::true_obliquity_of_ecliptic(jme, delta_epsilon);
     debug!("True obliquity of the ecliptic ε: {epsilon}°");
+
+    let delta_tau = apparent::aberration_correction(r);
+    debug!("Aberration correction Δτ: {delta_tau}°");
+    let lambda = apparent::apparent_sun_longitude(theta, delta_psi, delta_tau);
+    debug!("Apparent sun longitude λ: {lambda}°");
 }
