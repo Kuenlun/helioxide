@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #![cfg_attr(all(test, coverage_nightly), feature(coverage_attribute))]
 #![feature(const_trait_impl)]
 
+pub mod apparent;
 pub mod error;
 pub mod geocentric;
 pub mod heliocentric;
