@@ -25,6 +25,7 @@ pub mod geocentric;
 pub mod heliocentric;
 pub mod helper;
 pub mod julian;
+pub mod nutation;
 pub mod time;
 
 #[cfg(test)]
