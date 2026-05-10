@@ -22,11 +22,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use chrono::Utc;
 use chrono_tz::Tz;
 use helioxide::{
-    SpaDateTime, apparent, equatorial, geocentric, heliocentric, horizontal, hour_angle, incidence,
-    julian, nutation, obliquity, parallax, sidereal,
+    SpaDateTime, apparent, equation_of_time, equatorial, geocentric, heliocentric, horizontal,
+    hour_angle, incidence, julian, nutation, obliquity, parallax, sidereal,
 };
 use log::{debug, info};
 
+#[allow(clippy::many_single_char_names, clippy::too_many_lines)]
 fn main() {
     // Approximate ΔT value in seconds for years around 2026.
     // Update this value as needed for more accurate calculations.
@@ -68,6 +69,9 @@ fn main() {
     debug!("Earth heliocentric longitude L: {l}°");
     debug!("Earth heliocentric latitude B: {b}°");
     debug!("Earth radius vector R: {r} AU");
+
+    let m = equation_of_time::sun_mean_longitude(jme);
+    debug!("Sun mean longitude M: {m}°");
 
     let theta = geocentric::geocentric_longitude(l);
     let beta = geocentric::geocentric_latitude(b);
@@ -150,4 +154,7 @@ fn main() {
         SURFACE_AZIMUTH_ROTATION_DEG,
     );
     info!("Surface incidence angle I: {incidence_angle}°");
+
+    let eot = equation_of_time::equation_of_time(m, alpha, delta_psi, epsilon);
+    info!("Equation of time E: {eot} min");
 }
