@@ -22,8 +22,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use chrono::Utc;
 use chrono_tz::Tz;
 use helioxide::{
-    SpaDateTime, apparent, equatorial, geocentric, heliocentric, hour_angle, julian, nutation,
-    obliquity, parallax, sidereal,
+    SpaDateTime, apparent, equatorial, geocentric, heliocentric, horizontal, hour_angle, julian,
+    nutation, obliquity, parallax, sidereal,
 };
 use log::{debug, info};
 
@@ -38,6 +38,9 @@ fn main() {
     const OBSERVER_LONGITUDE_DEG: f64 = -0.490_68;
     const OBSERVER_LATITUDE_DEG: f64 = 38.346_02;
     const OBSERVER_ELEVATION_M: f64 = 3.0;
+    // Annual averages used by equation 42's atmospheric refraction model.
+    const OBSERVER_PRESSURE_MBAR: f64 = 1015.0;
+    const OBSERVER_TEMPERATURE_C: f64 = 18.0;
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace")).init();
 
@@ -118,4 +121,21 @@ fn main() {
     let h_prime =
         hour_angle::topocentric_local_hour_angle(h, topocentric.parallax_in_right_ascension);
     debug!("Topocentric local hour angle H': {h_prime}°");
+
+    let e0 = horizontal::topocentric_elevation_without_refraction(
+        OBSERVER_LATITUDE_DEG,
+        topocentric.declination,
+        h_prime,
+    );
+    debug!("Topocentric elevation without refraction e₀: {e0}°");
+    let delta_e =
+        horizontal::atmospheric_refraction(e0, OBSERVER_PRESSURE_MBAR, OBSERVER_TEMPERATURE_C);
+    debug!("Atmospheric refraction Δe: {delta_e}°");
+    let zenith = horizontal::topocentric_zenith_angle(e0, delta_e);
+    info!("Topocentric zenith angle θ: {zenith}°");
+    let gamma =
+        horizontal::astronomers_azimuth(h_prime, OBSERVER_LATITUDE_DEG, topocentric.declination);
+    debug!("Topocentric astronomers' azimuth Γ: {gamma}°");
+    let azimuth = horizontal::topocentric_azimuth_angle(gamma);
+    info!("Topocentric azimuth Φ: {azimuth}°");
 }
