@@ -28,22 +28,28 @@ use crate::julian::{
 };
 use chrono::{TimeZone, Utc};
 
-/// JCE for the Table A5.1 worked example: 2003-10-17 12:30:30 LST, TZ = -7 h
-/// (i.e. 19:30:30 UT) with ΔT = 67 s. The JD is reconstructed from the
-/// civil instant rather than the report's six-decimal printed value, because
-/// the latter loses ~2·10⁻⁷ d that `L1 ≈ 6·10¹¹` amplifies into the trailing
-/// decimals of every published subseries total.
-pub fn reference_jce() -> f64 {
+/// JD for the Table A5.1 worked example: 2003-10-17 12:30:30 LST, TZ = -7 h
+/// (i.e. 19:30:30 UT). The JD is reconstructed from the civil instant
+/// rather than the report's six-decimal printed value, because the latter
+/// loses ~2·10⁻⁷ d that `L1 ≈ 6·10¹¹` amplifies into the trailing decimals
+/// of every published subseries total. The diurnal coefficient of
+/// equation 28 (≈ 360.99°/d) would also amplify it into ~8·10⁻⁵° on `ν₀`.
+pub fn reference_jd() -> f64 {
     let utc = Utc
         .with_ymd_and_hms(2003, 10, 17, 19, 30, 30)
         .single()
         .expect("non-ambiguous reference instant");
-    let jd = calculate_julian_day(&SpaDateTime::new(utc));
-    let jde = calculate_julian_ephemeris_day(jd, 67.0);
+    calculate_julian_day(&SpaDateTime::new(utc))
+}
+
+/// JCE for the Table A5.1 worked example with ΔT = 67 s. See
+/// [`reference_jd`] for the civil instant the chain originates from.
+pub fn reference_jce() -> f64 {
+    let jde = calculate_julian_ephemeris_day(reference_jd(), 67.0);
     calculate_julian_ephemeris_century(jde)
 }
 
-/// JME for the Table A5.1 worked example. See [`reference_jce`] for the
+/// JME for the Table A5.1 worked example. See [`reference_jd`] for the
 /// civil instant the chain originates from.
 pub fn reference_jme() -> f64 {
     calculate_julian_ephemeris_millennium(reference_jce())

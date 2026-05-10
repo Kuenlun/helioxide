@@ -28,6 +28,7 @@ pub mod helper;
 pub mod julian;
 pub mod nutation;
 pub mod obliquity;
+pub mod sidereal;
 pub mod time;
 
 #[cfg(test)]
