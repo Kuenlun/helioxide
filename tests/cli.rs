@@ -49,6 +49,8 @@ fn binary_runs_and_logs_expected_output_markers() -> Result<(), Box<dyn std::err
         "True obliquity of the ecliptic ε:",
         "Aberration correction Δτ:",
         "Apparent sun longitude λ:",
+        "Mean sidereal time at Greenwich ν₀:",
+        "Apparent sidereal time at Greenwich ν:",
     ] {
         assert!(
             stderr.contains(marker),
