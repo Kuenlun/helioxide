@@ -44,6 +44,9 @@ fn binary_runs_and_logs_expected_output_markers() -> Result<(), Box<dyn std::err
         "Earth radius vector R:",
         "Sun geocentric longitude Θ:",
         "Sun geocentric latitude β:",
+        "Nutation in longitude Δψ:",
+        "Nutation in obliquity Δε:",
+        "True obliquity of the ecliptic ε:",
     ] {
         assert!(
             stderr.contains(marker),
