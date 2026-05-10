@@ -19,10 +19,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use std::process::Command;
 
 #[test]
-fn binary_runs_and_logs_expected_output_markers() -> Result<(), Box<dyn std::error::Error>> {
-    let output = Command::new(env!("CARGO_BIN_EXE_helioxide"))
-        .env("RUST_LOG", "trace")
-        .output()?;
+fn binary_runs_and_prints_expected_output_markers() -> Result<(), Box<dyn std::error::Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_helioxide")).output()?;
 
     assert!(
         output.status.success(),
@@ -31,7 +29,7 @@ fn binary_runs_and_logs_expected_output_markers() -> Result<(), Box<dyn std::err
         String::from_utf8_lossy(&output.stderr),
     );
 
-    let stderr = String::from_utf8(output.stderr)?;
+    let stdout = String::from_utf8(output.stdout)?;
     for marker in [
         "Now:",
         "Julian Day:",
@@ -59,10 +57,17 @@ fn binary_runs_and_logs_expected_output_markers() -> Result<(), Box<dyn std::err
         "Topocentric sun right ascension α':",
         "Topocentric sun declination δ':",
         "Topocentric local hour angle H':",
+        "Topocentric elevation without refraction e₀:",
+        "Atmospheric refraction Δe:",
+        "Topocentric zenith angle θ:",
+        "Topocentric astronomers' azimuth Γ:",
+        "Topocentric azimuth Φ:",
+        "Surface incidence angle I:",
+        "Equation of time E:",
     ] {
         assert!(
-            stderr.contains(marker),
-            "stderr missing marker {marker:?}\nfull stderr:\n{stderr}",
+            stdout.contains(marker),
+            "stdout missing marker {marker:?}\nfull stdout:\n{stdout}",
         );
     }
 
