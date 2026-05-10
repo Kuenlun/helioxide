@@ -114,4 +114,8 @@ fn main() {
         "Topocentric sun declination δ': {}°",
         topocentric.declination,
     );
+
+    let h_prime =
+        hour_angle::topocentric_local_hour_angle(h, topocentric.parallax_in_right_ascension);
+    debug!("Topocentric local hour angle H': {h_prime}°");
 }

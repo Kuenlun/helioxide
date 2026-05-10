@@ -54,3 +54,12 @@ pub fn reference_jce() -> f64 {
 pub fn reference_jme() -> f64 {
     calculate_julian_ephemeris_millennium(reference_jce())
 }
+
+/// Reference observer site from Appendix A.5: latitude `φ` (positive
+/// north of the equator per section 3.12.2), longitude `σ` (positive
+/// east of Greenwich per section 3.11), elevation `E` above sea level
+/// per section 3.12.3. Reused by every reference-instant test so the
+/// published civil instant feeds a single, canonical observer.
+pub const REFERENCE_LATITUDE_DEGREES: f64 = 39.742_476;
+pub const REFERENCE_LONGITUDE_DEGREES: f64 = -105.178_6;
+pub const REFERENCE_ELEVATION_METRES: f64 = 1830.14;
