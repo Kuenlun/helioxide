@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #![feature(const_trait_impl)]
 
 pub mod apparent;
+pub mod equation_of_time;
 pub mod equatorial;
 pub mod error;
 pub mod geocentric;
