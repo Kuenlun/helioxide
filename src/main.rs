@@ -22,7 +22,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use chrono::Utc;
 use chrono_tz::Tz;
 use helioxide::{
-    SpaDateTime, apparent, geocentric, heliocentric, julian, nutation, obliquity, sidereal,
+    SpaDateTime, apparent, equatorial, geocentric, heliocentric, julian, nutation, obliquity,
+    sidereal,
 };
 use log::{debug, info};
 
@@ -75,4 +76,9 @@ fn main() {
     debug!("Mean sidereal time at Greenwich ν₀: {nu0}°");
     let nu = sidereal::apparent_sidereal_time(nu0, delta_psi, epsilon);
     debug!("Apparent sidereal time at Greenwich ν: {nu}°");
+
+    let alpha = equatorial::geocentric_right_ascension(lambda, beta, epsilon);
+    debug!("Sun geocentric right ascension α: {alpha}°");
+    let delta = equatorial::geocentric_declination(lambda, beta, epsilon);
+    debug!("Sun geocentric declination δ: {delta}°");
 }
