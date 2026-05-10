@@ -53,6 +53,7 @@ fn binary_runs_and_logs_expected_output_markers() -> Result<(), Box<dyn std::err
         "Apparent sidereal time at Greenwich ν:",
         "Sun geocentric right ascension α:",
         "Sun geocentric declination δ:",
+        "Observer local hour angle H:",
     ] {
         assert!(
             stderr.contains(marker),
