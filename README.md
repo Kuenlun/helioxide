@@ -1,4 +1,11 @@
 # helioxide
+
+[![CI](https://github.com/Kuenlun/helioxide/actions/workflows/rust.yml/badge.svg?branch=master)](https://github.com/Kuenlun/helioxide/actions/workflows/rust.yml)
+[![codecov](https://codecov.io/gh/Kuenlun/helioxide/branch/master/graph/badge.svg)](https://codecov.io/gh/Kuenlun/helioxide)
+[![Crates.io](https://img.shields.io/crates/v/helioxide.svg)](https://crates.io/crates/helioxide)
+[![Docs.rs](https://docs.rs/helioxide/badge.svg)](https://docs.rs/helioxide)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+
 A pure Rust implementation of the NREL Solar Position Algorithm (SPA) for high-precision solar calculations
 
 ## License
