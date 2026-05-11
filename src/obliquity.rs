@@ -2,20 +2,63 @@
 // helioxide - Rust implementation of NREL Solar Position Algorithm (SPA)
 // Copyright (c) 2026 Juan Luis Leal Contreras (Kuenlun)
 
-//! True obliquity of the ecliptic (`ε`).
+//! Mean (`ε₀`) and true (`ε`) obliquity of the ecliptic.
 //!
 //! Implements section 3.5 of NREL/TP-560-34302. The mean obliquity `ε₀`
-//! (equation 24) is a tenth-degree polynomial in `U = JME / 10` that yields
-//! arc seconds; equation 25 then converts to degrees and adds the nutation
-//! in obliquity `Δε`. The two steps are fused in a single call because the
-//! intermediate `ε₀` has no other downstream consumer, so a separate public
-//! function would only widen the API surface.
+//! (equation 24) is a tenth-degree polynomial in `U = JME / 10` that
+//! yields arc seconds. Equation 25 then converts `ε₀` to degrees and adds
+//! the nutation in obliquity `Δε` to obtain the true obliquity `ε`. Each
+//! quantity is surfaced through its own public function so callers can
+//! consume `ε₀` directly in the unit equation 24 publishes it (arc
+//! seconds) without having to back it out of `ε`.
 
 /// Polynomial coefficients of `ε₀` (arc seconds) in `U = JME / 10`, ordered
 /// from the constant term up to `U¹⁰`. Reproduced verbatim from equation 24.
 const MEAN_OBLIQUITY_COEFFICIENTS: [f64; 11] = [
     84_381.448, -4_680.93, -1.55, 1_999.25, -51.38, -249.67, -39.05, 7.12, 27.87, 5.79, 2.45,
 ];
+
+/// Mean obliquity of the ecliptic `ε₀` (arc seconds).
+///
+/// `jme` is the Julian Ephemeris Millennium, as produced by
+/// [`calculate_julian_ephemeris_millennium`].
+///
+/// Refer to section 3.5, equation 24:
+/// `ε₀ = 84381.448 + U·(-4680.93 + U·(-1.55 + U·(1999.25 + U·(-51.38 + U·(-249.67 + U·(-39.05 + U·(7.12 + U·(27.87 + U·(5.79 + U·2.45)))))))))`
+/// where `U = JME / 10`. The output is in the same unit equation 24
+/// publishes it (arc seconds); [`true_obliquity_of_ecliptic`] performs
+/// the arc-second-to-degree conversion mandated by equation 25.
+///
+/// # Examples
+///
+/// ```
+/// use helioxide::julian::{
+///     calculate_julian_ephemeris_century, calculate_julian_ephemeris_day,
+///     calculate_julian_ephemeris_millennium,
+/// };
+/// use helioxide::obliquity::mean_obliquity_of_ecliptic_arcseconds;
+///
+/// // Table A5.1 reference: 17 October 2003, 12:30:30 LST, ΔT = 67 s.
+/// let jde = calculate_julian_ephemeris_day(2_452_930.312_847, 67.0);
+/// let jce = calculate_julian_ephemeris_century(jde);
+/// let jme = calculate_julian_ephemeris_millennium(jce);
+///
+/// let epsilon0 = mean_obliquity_of_ecliptic_arcseconds(jme);
+/// // ε₀ ≈ 84_379.67" at this instant (`ε ≈ 23.440465°` minus the
+/// // nutation `Δε ≈ 0.001666°`, scaled back to arc seconds).
+/// assert!((epsilon0 - 84_379.67).abs() < 0.1);
+/// ```
+///
+/// [`calculate_julian_ephemeris_millennium`]: crate::julian::calculate_julian_ephemeris_millennium
+#[must_use]
+pub fn mean_obliquity_of_ecliptic_arcseconds(jme: f64) -> f64 {
+    // Equation 24: ε₀ in arc seconds, evaluated by Horner's method on U.
+    let u = jme / 10.0;
+    MEAN_OBLIQUITY_COEFFICIENTS
+        .iter()
+        .rev()
+        .fold(0.0_f64, |acc, &coefficient| acc.mul_add(u, coefficient))
+}
 
 /// True obliquity of the ecliptic `ε` (degrees).
 ///
@@ -24,7 +67,9 @@ const MEAN_OBLIQUITY_COEFFICIENTS: [f64; 11] = [
 /// nutation in obliquity `Δε` (degrees), as produced by
 /// [`nutation_in_longitude_and_obliquity`].
 ///
-/// Refer to section 3.5, equations 24 and 25.
+/// Refer to section 3.5, equation 25: `ε = ε₀ / 3600 + Δε`. `ε₀` is the
+/// mean obliquity in arc seconds, as produced by
+/// [`mean_obliquity_of_ecliptic_arcseconds`].
 ///
 /// # Examples
 ///
@@ -48,23 +93,17 @@ const MEAN_OBLIQUITY_COEFFICIENTS: [f64; 11] = [
 ///
 /// [`calculate_julian_ephemeris_millennium`]: crate::julian::calculate_julian_ephemeris_millennium
 /// [`nutation_in_longitude_and_obliquity`]: crate::nutation::nutation_in_longitude_and_obliquity
+/// [`mean_obliquity_of_ecliptic_arcseconds`]: self::mean_obliquity_of_ecliptic_arcseconds
 #[must_use]
 pub fn true_obliquity_of_ecliptic(jme: f64, delta_epsilon: f64) -> f64 {
-    // Equation 24: ε₀ in arc seconds, evaluated by Horner's method on U.
-    let u = jme / 10.0;
-    let mean_obliquity_arcseconds = MEAN_OBLIQUITY_COEFFICIENTS
-        .iter()
-        .rev()
-        .fold(0.0_f64, |acc, &coefficient| acc.mul_add(u, coefficient));
-
     // Equation 25: ε = ε₀ / 3600 + Δε  (arc seconds → degrees, then add Δε).
-    mean_obliquity_arcseconds / 3600.0 + delta_epsilon
+    mean_obliquity_of_ecliptic_arcseconds(jme) / 3600.0 + delta_epsilon
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::true_obliquity_of_ecliptic;
+    use super::{mean_obliquity_of_ecliptic_arcseconds, true_obliquity_of_ecliptic};
     use crate::nutation::nutation_in_longitude_and_obliquity;
     use crate::test_fixtures::{reference_jce, reference_jme};
 
@@ -119,5 +158,42 @@ mod tests {
                 "ε must shift by Δε; got {shifted} - {baseline} ≠ {delta}",
             );
         }
+    }
+
+    /// `ε₀` at the Table A5.1 reference instant must match the value
+    /// derived from the published true obliquity by subtracting the
+    /// published nutation (`Δε`) and scaling back to arc seconds:
+    /// `(ε − Δε) · 3600`. Pinning it directly here ensures the
+    /// arc-seconds output (the unit equation 24 publishes it in) is
+    /// not silently rescaled by [`true_obliquity_of_ecliptic`]'s
+    /// `1/3600` divisor.
+    #[test]
+    fn mean_obliquity_arcseconds_matches_table_a5_1_via_round_trip() {
+        let (_, delta_epsilon) = nutation_in_longitude_and_obliquity(reference_jce());
+        let epsilon0_via_function = mean_obliquity_of_ecliptic_arcseconds(reference_jme());
+        let epsilon0_via_round_trip = (23.440_465_f64 - delta_epsilon) * 3600.0;
+        assert!(
+            (epsilon0_via_function - epsilon0_via_round_trip).abs() < 0.1,
+            "ε₀ at A5.1 reference must equal (ε − Δε)·3600 within the published \
+             precision: got {epsilon0_via_function}\" vs round-trip \
+             {epsilon0_via_round_trip}\"",
+        );
+    }
+
+    /// At `JME = 0` (J2000.0 epoch) `U = 0`, so equation 24 collapses
+    /// to its constant term `84_381.448"`. This isolates the constant
+    /// from every other coefficient: a stray `_` typo in `84_381.448`
+    /// would fail here even when the A5.1 reference test still passes
+    /// (because the latter exercises a single non-zero `JME` where
+    /// compensating typos in the higher-order coefficients could mask
+    /// the bug).
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn mean_obliquity_arcseconds_at_j2000_collapses_to_constant_term() {
+        let epsilon0 = mean_obliquity_of_ecliptic_arcseconds(0.0);
+        assert_eq!(
+            epsilon0, 84_381.448,
+            "ε₀ at JME = 0 must equal 84_381.448\"",
+        );
     }
 }
