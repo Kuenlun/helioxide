@@ -459,7 +459,12 @@ pub fn sunrise_or_sunset_time(
 /// are populated only when the sun crosses the horizon on `D₀`; at high
 /// latitudes near the solstices they are `None` (polar day or polar
 /// night).
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Beyond the three event instants, the struct also exposes the per-event
+/// topocentric local hour angles `H'ᵢ` at sunrise and sunset (per
+/// equation A11, signed and wrapped into `(-180°, 180°]`) and the sun
+/// altitude at transit `h₀` (per equation A12).
+#[derive(Debug, Clone, PartialEq)]
 pub struct SolarDay<Tz: TimeZone> {
     /// Sun transit instant (solar noon at the observer's longitude).
     pub transit: DateTime<Tz>,
@@ -467,6 +472,20 @@ pub struct SolarDay<Tz: TimeZone> {
     pub sunrise: Option<DateTime<Tz>>,
     /// Sunset instant, or `None` for polar day/night.
     pub sunset: Option<DateTime<Tz>>,
+    /// Sun altitude at the transit instant (degrees, in `[-90°, 90°]`).
+    /// Always populated: at transit `H' ≈ 0°`, so equation A12 collapses
+    /// to `arcsin(sin φ · sin δ' + cos φ · cos δ') ≈ 90° − |φ − δ'|`,
+    /// the geometric upper-culmination altitude. Negative values place
+    /// the transit below the horizon (polar night).
+    pub sun_transit_altitude: f64,
+    /// Topocentric local hour angle `H'₁` at sunrise (degrees, signed,
+    /// typically in `(-180°, 180°]`), per equation A11. `None` for polar
+    /// day/night.
+    pub sunrise_hour_angle: Option<f64>,
+    /// Topocentric local hour angle `H'₂` at sunset (degrees, signed,
+    /// typically in `(-180°, 180°]`), per equation A11. `None` for polar
+    /// day/night.
+    pub sunset_hour_angle: Option<f64>,
 }
 
 impl<Tz: TimeZone> SolarDay<Tz> {
@@ -576,8 +595,9 @@ impl<Tz: TimeZone> SolarDay<Tz> {
             SUN_ELEVATION_AT_HORIZON_DEGREES,
         );
 
-        // Step A.2.13 — refined transit time T.
-        let transit_fraction = refined_event_fraction_of_day(
+        // Step A.2.13 — refined transit time T plus the per-event H'/δ'
+        // bundle that backs the sun_transit_altitude readout below.
+        let transit_event = refined_event_fraction_of_day(
             EventKind::Transit,
             m_0,
             nu,
@@ -587,8 +607,10 @@ impl<Tz: TimeZone> SolarDay<Tz> {
             (delta_minus, delta_zero, delta_plus),
         );
 
-        // Steps A.2.5/A.2.6 + A.2.14/A.2.15 — refined sunrise R and sunset S.
-        let (sunrise_fraction, sunset_fraction) = h_0.map_or((None, None), |h0| {
+        // Steps A.2.5/A.2.6 + A.2.14/A.2.15 — refined sunrise R and sunset S
+        // along with the per-event H'/δ' bundles that back the
+        // sunrise_hour_angle/sunset_hour_angle readouts below.
+        let (sunrise_event, sunset_event) = h_0.map_or((None, None), |h0| {
             let m_1 = approximate_sunrise_time(m_0, h0);
             let m_2 = approximate_sunset_time(m_0, h0);
             let r = refined_event_fraction_of_day(
@@ -615,7 +637,7 @@ impl<Tz: TimeZone> SolarDay<Tz> {
         // Wrap T into [0, 1) and unwrap R, S to the closest representative
         // around T, so the returned datetimes preserve the natural ordering
         // sunrise < transit < sunset across the anchored day boundaries.
-        let transit_wrapped = transit_fraction.rem_euclid(1.0);
+        let transit_wrapped = transit_event.fraction_of_day.rem_euclid(1.0);
         let to_datetime = |fraction_of_day: f64| -> DateTime<Tz> {
             // Round to whole milliseconds: appendix A.2 publishes events to
             // hundredths of a second (Table A2.1), and milliseconds resolve
@@ -636,10 +658,22 @@ impl<Tz: TimeZone> SolarDay<Tz> {
             }
         };
 
+        // Sun transit altitude at the refined transit time. At transit
+        // `H' ≈ 0°`, so this is essentially `arcsin(sin φ · sin δ' +
+        // cos φ · cos δ')`, the upper-culmination altitude.
+        let sun_transit_altitude = sun_altitude_at_event(
+            observer.latitude,
+            transit_event.interpolated_declination,
+            transit_event.local_hour_angle,
+        );
+
         Self {
             transit: to_datetime(transit_wrapped),
-            sunrise: sunrise_fraction.map(|r| to_datetime(unwrap_to_transit(r))),
-            sunset: sunset_fraction.map(|s| to_datetime(unwrap_to_transit(s))),
+            sunrise: sunrise_event.map(|r| to_datetime(unwrap_to_transit(r.fraction_of_day))),
+            sunset: sunset_event.map(|s| to_datetime(unwrap_to_transit(s.fraction_of_day))),
+            sun_transit_altitude,
+            sunrise_hour_angle: sunrise_event.map(|r| r.local_hour_angle),
+            sunset_hour_angle: sunset_event.map(|s| s.local_hour_angle),
         }
     }
 }
@@ -650,14 +684,23 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.sunrise {
-            Some(sunrise) => writeln!(f, "Sunrise:     {sunrise}")?,
-            None => writeln!(f, "Sunrise:     none (polar day or polar night)")?,
+            Some(sunrise) => writeln!(f, "Sunrise:                {sunrise}")?,
+            None => writeln!(f, "Sunrise:                none (polar day or polar night)")?,
         }
-        writeln!(f, "Sun transit: {}", self.transit)?;
+        writeln!(f, "Sun transit:            {}", self.transit)?;
         match &self.sunset {
-            Some(sunset) => write!(f, "Sunset:      {sunset}"),
-            None => write!(f, "Sunset:      none (polar day or polar night)"),
+            Some(sunset) => writeln!(f, "Sunset:                 {sunset}")?,
+            None => writeln!(f, "Sunset:                 none (polar day or polar night)")?,
         }
+        match self.sunrise_hour_angle {
+            Some(hour_angle) => writeln!(f, "Sunrise hour angle:     {hour_angle}°")?,
+            None => writeln!(f, "Sunrise hour angle:     none (polar day or polar night)")?,
+        }
+        match self.sunset_hour_angle {
+            Some(hour_angle) => writeln!(f, "Sunset hour angle:      {hour_angle}°")?,
+            None => writeln!(f, "Sunset hour angle:      none (polar day or polar night)")?,
+        }
+        write!(f, "Sun transit altitude:   {}°", self.sun_transit_altitude)
     }
 }
 
@@ -669,9 +712,30 @@ enum EventKind {
     Sunset,
 }
 
-/// Final fraction of UT day for one of the three appendix A.2 events.
+/// Per-event quantities produced by the appendix A.2 refinement step.
+///
+/// Bundles the final fraction of UT day with the topocentric local hour
+/// angle `H'` and the interpolated declination `δ'` evaluated at the
+/// approximate event time. The latter two are surfaced on [`SolarDay`]
+/// (`sunrise_hour_angle`, `sunset_hour_angle`, `sun_transit_altitude`)
+/// without rerunning the whole interpolation downstream.
+#[derive(Debug, Clone, Copy)]
+struct RefinedEvent {
+    /// Final fraction of UT day from `0 UT` (per equation A13/A14/A15).
+    fraction_of_day: f64,
+    /// Topocentric local hour angle `H'` at the approximate event time
+    /// (degrees, in `(-180°, 180°]`, per step A.2.11).
+    local_hour_angle: f64,
+    /// Interpolated sun declination `δ'` at the approximate event time
+    /// (degrees, signed).
+    interpolated_declination: f64,
+}
+
+/// Refined per-event quantities for one of the three appendix A.2 events.
 /// Bundles steps A.2.8 to A.2.12 plus the closing equation A13/A14/A15
-/// so the [`SolarDay::compute`] orchestrator stays linear.
+/// so the [`SolarDay::compute`] orchestrator stays linear and so the
+/// per-event `H'` and `δ'` are surfaced without rerunning the
+/// interpolation downstream.
 #[allow(clippy::similar_names, clippy::too_many_arguments)]
 fn refined_event_fraction_of_day(
     kind: EventKind,
@@ -681,7 +745,7 @@ fn refined_event_fraction_of_day(
     delta_t_seconds: f64,
     alpha_three_day: (f64, f64, f64),
     delta_three_day: (f64, f64, f64),
-) -> f64 {
+) -> RefinedEvent {
     let m = approximate_event_time;
     let nu_i = sidereal_time_at_event(apparent_sidereal_time_at_0ut, m);
     let n_i = delta_t_corrected_event_time(m, delta_t_seconds);
@@ -691,7 +755,7 @@ fn refined_event_fraction_of_day(
     let delta_prime = interpolate_three_day_value(delta_minus, delta_zero, delta_plus, n_i);
     let h_prime = event_local_hour_angle(nu_i, observer.longitude, alpha_prime);
 
-    match kind {
+    let fraction_of_day = match kind {
         EventKind::Transit => sun_transit_time(m, h_prime),
         EventKind::Sunrise | EventKind::Sunset => {
             let h_at_event = sun_altitude_at_event(observer.latitude, delta_prime, h_prime);
@@ -704,6 +768,12 @@ fn refined_event_fraction_of_day(
                 h_prime,
             )
         }
+    };
+
+    RefinedEvent {
+        fraction_of_day,
+        local_hour_angle: h_prime,
+        interpolated_declination: delta_prime,
     }
 }
 
@@ -1727,12 +1797,12 @@ mod tests {
             );
         };
         assert_close(
-            fraction_to_clock_seconds(transit),
+            fraction_to_clock_seconds(transit.fraction_of_day),
             67_565,
             "transit at A5.1",
         );
         assert_close(
-            fraction_to_clock_seconds(sunrise),
+            fraction_to_clock_seconds(sunrise.fraction_of_day),
             47_563,
             "sunrise at A5.1",
         );
@@ -1741,7 +1811,41 @@ mod tests {
         // what later lifts it onto Oct 18 by unwrapping relative to the
         // transit. This test is checking the dispatch only, so it
         // compares to the wrapped 1 219 s.
-        assert_close(fraction_to_clock_seconds(sunset), 1_219, "sunset at A5.1");
+        assert_close(
+            fraction_to_clock_seconds(sunset.fraction_of_day),
+            1_219,
+            "sunset at A5.1",
+        );
+
+        // Per-event H' must be small at transit (sun on the meridian by
+        // construction) and roughly mirror around it at sunrise/sunset.
+        // This pins the new RefinedEvent fields against a known operating
+        // point, ensuring the orchestrator wires them through unchanged.
+        assert!(
+            transit.local_hour_angle.abs() < 0.1,
+            "H' at transit must be near zero: got {}",
+            transit.local_hour_angle,
+        );
+        assert!(
+            sunrise.local_hour_angle < 0.0,
+            "H' at sunrise must be negative (east of meridian): got {}",
+            sunrise.local_hour_angle,
+        );
+        assert!(
+            sunset.local_hour_angle > 0.0,
+            "H' at sunset must be positive (west of meridian): got {}",
+            sunset.local_hour_angle,
+        );
+
+        // δ' at transit must agree with δ_zero within the diurnal motion
+        // of the sun's declination (≤ 0.4°/day). This pins the
+        // interpolated_declination wiring on the new RefinedEvent struct.
+        assert!(
+            (transit.interpolated_declination - delta_zero).abs() < 1.0,
+            "δ' at transit must lie within ~1° of δ₀: got {} vs {}",
+            transit.interpolated_declination,
+            delta_zero,
+        );
     }
 
     /// At an extreme east longitude where transit lands in the early
@@ -1829,13 +1933,13 @@ mod tests {
     }
 
     /// `SolarDay`'s [`fmt::Display`] impl must surface the
-    /// `none (polar day or polar night)` placeholder for both
-    /// [`Option::None`] arms (sunrise and sunset). This pins the
-    /// `match` arms inside the [`fmt::Display`] impl that the
-    /// non-polar test above cannot exercise. The construction uses a
-    /// hand-rolled [`SolarDay`] (rather than running the full
-    /// orchestrator at a polar location) so the Display path is
-    /// pinned independently of the upstream polar guard.
+    /// `none (polar day or polar night)` placeholder for all four
+    /// [`Option::None`] arms (sunrise time, sunset time, sunrise hour
+    /// angle, sunset hour angle). This pins the `match` arms inside the
+    /// [`fmt::Display`] impl that the non-polar test above cannot
+    /// exercise. The construction uses a hand-rolled [`SolarDay`] (rather
+    /// than running the full orchestrator at a polar location) so the
+    /// Display path is pinned independently of the upstream polar guard.
     #[test]
     fn solar_day_display_marks_polar_day_for_missing_sunrise_or_sunset() {
         let transit = Utc
@@ -1846,17 +1950,26 @@ mod tests {
             transit,
             sunrise: None,
             sunset: None,
+            sun_transit_altitude: -23.0,
+            sunrise_hour_angle: None,
+            sunset_hour_angle: None,
         };
         let rendered = format!("{polar_day}");
-        // Both polar arms must surface the placeholder line.
+        // All four polar arms (sunrise time, sunset time, sunrise hour
+        // angle, sunset hour angle) must surface the placeholder line.
         let occurrences = rendered.matches("none (polar day or polar night)").count();
         assert_eq!(
-            occurrences, 2,
-            "polar-day Display must mark both Sunrise and Sunset as none: got {rendered}",
+            occurrences, 4,
+            "polar-day Display must mark sunrise/sunset and their hour angles as none: \
+             got {rendered}",
         );
         assert!(
             rendered.contains("Sun transit:"),
             "polar-day Display must still surface the transit line: got {rendered}",
+        );
+        assert!(
+            rendered.contains("Sun transit altitude:"),
+            "polar-day Display must still surface the transit altitude line: got {rendered}",
         );
     }
 
@@ -1881,24 +1994,36 @@ mod tests {
                 transit,
                 sunrise: Some(transit - chrono::TimeDelta::hours(6)),
                 sunset: Some(transit + chrono::TimeDelta::hours(6)),
+                sun_transit_altitude: 65.0,
+                sunrise_hour_angle: Some(-90.0),
+                sunset_hour_angle: Some(90.0),
             },
             // Sunrise = None, Sunset = Some — pins the polar `?` on the sunrise line.
             SolarDay::<Utc> {
                 transit,
                 sunrise: None,
                 sunset: Some(transit + chrono::TimeDelta::hours(6)),
+                sun_transit_altitude: 65.0,
+                sunrise_hour_angle: None,
+                sunset_hour_angle: Some(90.0),
             },
             // Sunrise = Some, Sunset = None — pins the polar `?` on the sunset line.
             SolarDay::<Utc> {
                 transit,
                 sunrise: Some(transit - chrono::TimeDelta::hours(6)),
                 sunset: None,
+                sun_transit_altitude: 65.0,
+                sunrise_hour_angle: Some(-90.0),
+                sunset_hour_angle: None,
             },
             // Both None — full polar configuration.
             SolarDay::<Utc> {
                 transit,
                 sunrise: None,
                 sunset: None,
+                sun_transit_altitude: 65.0,
+                sunrise_hour_angle: None,
+                sunset_hour_angle: None,
             },
         ];
 

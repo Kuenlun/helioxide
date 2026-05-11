@@ -178,6 +178,41 @@ pub fn atmospheric_refraction(
         / (ARC_MINUTES_PER_DEGREE * auxiliary_degrees.to_radians().tan())
 }
 
+/// Topocentric elevation angle (corrected) `e` (degrees).
+///
+/// `elevation_without_refraction` is `e₀` (degrees), as produced by
+/// [`topocentric_elevation_without_refraction`]. `refraction` is `Δe`
+/// (degrees), as produced by [`atmospheric_refraction`].
+///
+/// Refer to section 3.14.3, equation 43: `e = e₀ + Δe`. `e` is the sun
+/// elevation that an observer actually measures from the horizon, with
+/// the geometric horizon-to-sun arc lifted by atmospheric refraction.
+/// The complementary [`topocentric_zenith_angle`] returns `90° − e` for
+/// callers that need the zenith form consumed by section 3.16's
+/// incidence equation 47.
+///
+/// # Examples
+///
+/// ```
+/// use helioxide::horizontal::topocentric_elevation_corrected;
+///
+/// // Table A5.1: e₀ ≈ 39.872°, Δe ≈ 0.01633° → e ≈ 39.88833°.
+/// let e = topocentric_elevation_corrected(39.872, 0.016_33);
+/// assert!((e - 39.888_33).abs() < 1e-5);
+/// ```
+///
+/// [`topocentric_elevation_without_refraction`]: self::topocentric_elevation_without_refraction
+/// [`atmospheric_refraction`]: self::atmospheric_refraction
+/// [`topocentric_zenith_angle`]: self::topocentric_zenith_angle
+#[inline]
+#[must_use]
+pub const fn topocentric_elevation_corrected(
+    elevation_without_refraction: f64,
+    refraction: f64,
+) -> f64 {
+    elevation_without_refraction + refraction
+}
+
 /// Topocentric zenith angle `θ` (degrees, signed, not range-limited).
 ///
 /// `elevation_without_refraction` is `e₀` (degrees), as produced by
@@ -185,11 +220,9 @@ pub fn atmospheric_refraction(
 /// (degrees), as produced by [`atmospheric_refraction`].
 ///
 /// Refer to sections 3.14.3 and 3.14.4, equations 43 and 44:
-/// `e = e₀ + Δe`, `θ = 90° − e`. The two steps fuse into one expression
-/// because the corrected elevation `e` has no other downstream consumer
-/// (section 3.16's incidence equation 47 takes `θ`, not `e`); a separate
-/// public helper would only widen the API surface for an algebraic
-/// rearrangement of `θ`.
+/// `e = e₀ + Δe`, `θ = 90° − e`. Callers that also need the intermediate
+/// corrected elevation `e` can obtain it from
+/// [`topocentric_elevation_corrected`].
 ///
 /// # Examples
 ///
@@ -203,6 +236,7 @@ pub fn atmospheric_refraction(
 ///
 /// [`topocentric_elevation_without_refraction`]: self::topocentric_elevation_without_refraction
 /// [`atmospheric_refraction`]: self::atmospheric_refraction
+/// [`topocentric_elevation_corrected`]: self::topocentric_elevation_corrected
 #[inline]
 #[must_use]
 pub const fn topocentric_zenith_angle(elevation_without_refraction: f64, refraction: f64) -> f64 {
@@ -286,14 +320,58 @@ pub const fn topocentric_azimuth_angle(astronomers_azimuth: f64) -> f64 {
     limit_degrees(astronomers_azimuth + 180.0)
 }
 
+/// Topocentric astronomers' azimuth `Γ` re-expressed in `(-180°, 180°]`
+/// (degrees, signed, measured westward from south).
+///
+/// `astronomers_azimuth_zero_360` is `Γ` (degrees, in `[0°, 360°)`), as
+/// produced by [`astronomers_azimuth`]. Inputs outside `[0°, 360°)` are
+/// not wrapped first, so a stray negative value would survive untouched
+/// upstream of the `> 180°` test; pass only the canonical wrapped form.
+///
+/// Section 3.15.1 mandates the `[0°, 360°)` form for `Γ`; this helper
+/// rephrases it as the signed `(-180°, 180°]` counterpart for callers
+/// who prefer the symmetric range. Negative values place the sun east
+/// of due south, positive values west; the boundary at `+180°`
+/// corresponds to due north.
+///
+/// # Examples
+///
+/// ```
+/// use helioxide::horizontal::astronomers_azimuth_signed;
+///
+/// // Table A5.1: Γ ≈ 14.34024° → signed value identical (lower half).
+/// let signed = astronomers_azimuth_signed(14.340_24);
+/// assert!((signed - 14.340_24).abs() < 1e-12);
+///
+/// // Upper half: Γ = 200° → -160°.
+/// let signed = astronomers_azimuth_signed(200.0);
+/// assert!((signed - -160.0).abs() < 1e-12);
+///
+/// // Boundary: Γ = 180° stays at +180° (the half-open interval is
+/// // closed on the high side and open on the low side).
+/// let signed = astronomers_azimuth_signed(180.0);
+/// assert!((signed - 180.0).abs() < 1e-12);
+/// ```
+///
+/// [`astronomers_azimuth`]: self::astronomers_azimuth
+#[inline]
+#[must_use]
+pub const fn astronomers_azimuth_signed(astronomers_azimuth_zero_360: f64) -> f64 {
+    if astronomers_azimuth_zero_360 > 180.0 {
+        astronomers_azimuth_zero_360 - 360.0
+    } else {
+        astronomers_azimuth_zero_360
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         HORIZON_CUTOFF_ELEVATION_DEGREES, REFERENCE_TEMPERATURE_KELVIN,
-        STANDARD_PRESSURE_MILLIBARS, astronomers_azimuth, atmospheric_refraction,
-        topocentric_azimuth_angle, topocentric_elevation_without_refraction,
-        topocentric_zenith_angle,
+        STANDARD_PRESSURE_MILLIBARS, astronomers_azimuth, astronomers_azimuth_signed,
+        atmospheric_refraction, topocentric_azimuth_angle, topocentric_elevation_corrected,
+        topocentric_elevation_without_refraction, topocentric_zenith_angle,
     };
     use crate::test_fixtures::{
         REFERENCE_LATITUDE_DEGREES, REFERENCE_PRESSURE_MILLIBARS, REFERENCE_TEMPERATURE_CELSIUS,
@@ -616,6 +694,85 @@ mod tests {
             assert!(
                 (0.0..360.0).contains(&phi),
                 "Φ escaped [0°, 360°) for Γ = {gamma}°: got {phi}",
+            );
+        }
+    }
+
+    /// Equation 43 sums `e₀` and `Δe` linearly. Shifting one input by
+    /// `δ` while holding the other fixed must shift `e` by `+δ`. This
+    /// pins both coefficients (each `+1`) and rules out a sign flip on
+    /// either input that would still survive [`topocentric_zenith_angle`]'s
+    /// `90° − (e₀ + Δe)` reference test by virtue of the outer
+    /// negation cancelling the bug.
+    #[test]
+    fn topocentric_elevation_corrected_is_linear_in_each_input() {
+        let baseline_e0 = 45.0_f64;
+        let baseline_delta_e = 0.01_f64;
+        let baseline = topocentric_elevation_corrected(baseline_e0, baseline_delta_e);
+        for &delta in &[-1.0_f64, -1e-4, 1e-6, 0.5] {
+            let from_e0 = topocentric_elevation_corrected(baseline_e0 + delta, baseline_delta_e);
+            let from_delta_e =
+                topocentric_elevation_corrected(baseline_e0, baseline_delta_e + delta);
+            assert!(
+                (from_e0 - baseline - delta).abs() < 1e-13,
+                "e must shift by +δ when e₀ shifts by δ = {delta}: \
+                 got {from_e0} - {baseline} ≠ {delta}",
+            );
+            assert!(
+                (from_delta_e - baseline - delta).abs() < 1e-13,
+                "e must shift by +δ when Δe shifts by δ = {delta}: \
+                 got {from_delta_e} - {baseline} ≠ {delta}",
+            );
+        }
+    }
+
+    /// `e + θ` must equal `90°` exactly, since equations 43 and 44 are
+    /// `e = e₀ + Δe` and `θ = 90° − e`. This pins
+    /// [`topocentric_elevation_corrected`] against the existing
+    /// [`topocentric_zenith_angle`] so a regression on either function
+    /// would surface as a non-`90°` sum even if neither reference test
+    /// caught the bug in isolation.
+    #[test]
+    fn topocentric_elevation_corrected_is_complement_of_zenith_angle() {
+        for &(e0, delta_e) in &[
+            (0.0_f64, 0.0_f64),
+            (39.872, 0.016_33),
+            (-1.0, 0.0),
+            (89.5, 0.5),
+        ] {
+            let e = topocentric_elevation_corrected(e0, delta_e);
+            let theta = topocentric_zenith_angle(e0, delta_e);
+            assert!(
+                (e + theta - 90.0).abs() < 1e-13,
+                "e + θ must equal 90° for (e₀, Δe) = ({e0}, {delta_e}): got {} ",
+                e + theta,
+            );
+        }
+    }
+
+    /// The signed astronomers' azimuth must be the identity for inputs
+    /// in `[0°, 180°]` and shift by `−360°` for inputs in `(180°, 360°)`.
+    /// The sweep covers both branches plus the `180°` boundary (which
+    /// stays at `+180°` per the half-open `(-180°, 180°]` convention).
+    #[test]
+    fn astronomers_azimuth_signed_passes_through_lower_half_and_shifts_upper_half() {
+        for &(input, expected) in &[
+            (0.0_f64, 0.0_f64),
+            (90.0, 90.0),
+            (179.999, 179.999),
+            (180.0, 180.0),      // boundary stays positive
+            (180.001, -179.999), // first instant past the boundary flips sign
+            (270.0, -90.0),
+            (359.999, -0.001),
+        ] {
+            let signed = astronomers_azimuth_signed(input);
+            assert!(
+                (signed - expected).abs() < 1e-12,
+                "signed Γ at input {input}° must equal {expected}°: got {signed}",
+            );
+            assert!(
+                signed > -180.0 && signed <= 180.0,
+                "signed Γ escaped (-180°, 180°] for input {input}°: got {signed}",
             );
         }
     }

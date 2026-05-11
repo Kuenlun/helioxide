@@ -103,11 +103,32 @@ pub struct SolarPosition {
     /// Sun geocentric latitude `β` (degrees, signed). Section 3.3.
     pub geocentric_latitude: f64,
 
+    /// Mean elongation of the moon from the sun `X₀` (degrees, raw — not
+    /// reduced into `[0°, 360°)`, as the only internal consumer is the
+    /// nutation series). Section 3.4, equation 15.
+    pub mean_elongation_moon_sun: f64,
+    /// Mean anomaly of the sun (Earth) `X₁` (degrees, raw). Section 3.4,
+    /// equation 16.
+    pub mean_anomaly_sun: f64,
+    /// Mean anomaly of the moon `X₂` (degrees, raw). Section 3.4,
+    /// equation 17.
+    pub mean_anomaly_moon: f64,
+    /// Moon's argument of latitude `X₃` (degrees, raw). Section 3.4,
+    /// equation 18.
+    pub argument_latitude_moon: f64,
+    /// Longitude of the ascending node of the moon's mean orbit on the
+    /// ecliptic, measured from the mean equinox of the date `X₄`
+    /// (degrees, raw). Section 3.4, equation 19.
+    pub ascending_longitude_moon: f64,
+
     /// Nutation in longitude `Δψ` (degrees, signed). Section 3.4.
     pub nutation_in_longitude: f64,
     /// Nutation in obliquity `Δε` (degrees, signed). Section 3.4.
     pub nutation_in_obliquity: f64,
 
+    /// Mean obliquity of the ecliptic `ε₀` (arc seconds). Section 3.5,
+    /// equation 24. Multiply by `1/3600` to obtain degrees.
+    pub mean_obliquity_arcseconds: f64,
     /// True obliquity of the ecliptic `ε` (degrees). Section 3.5.
     pub true_obliquity: f64,
 
@@ -157,13 +178,22 @@ pub struct SolarPosition {
     pub topocentric_elevation_unrefracted: f64,
     /// Atmospheric refraction correction `Δe` (degrees). Section 3.14.2.
     pub atmospheric_refraction: f64,
-    /// Topocentric zenith angle `θ` (degrees, signed, typically in
-    /// `[0°, 180°]`). Section 3.14.4.
+    /// Topocentric elevation angle (corrected) `e = e₀ + Δe` (degrees,
+    /// signed). Section 3.14.3.
+    pub topocentric_elevation_corrected: f64,
+    /// Topocentric zenith angle `θ = 90° − e` (degrees, signed, typically
+    /// in `[0°, 180°]`). Section 3.14.4.
     pub topocentric_zenith: f64,
 
     /// Topocentric astronomers' azimuth `Γ` (degrees, in `[0°, 360°)`,
     /// measured westward from south). Section 3.15.1.
     pub astronomers_azimuth: f64,
+    /// Topocentric astronomers' azimuth re-expressed in `(-180°, 180°]`
+    /// (degrees, signed, measured westward from south). Section 3.15.1
+    /// rephrased through [`astronomers_azimuth_signed`].
+    ///
+    /// [`astronomers_azimuth_signed`]: crate::horizontal::astronomers_azimuth_signed
+    pub astronomers_azimuth_signed: f64,
     /// Topocentric azimuth `Φ` (degrees, in `[0°, 360°)`, measured
     /// eastward from north). Section 3.15.2.
     pub topocentric_azimuth: f64,
@@ -232,8 +262,12 @@ impl SolarPosition {
         let theta = geocentric::geocentric_longitude(l);
         let beta = geocentric::geocentric_latitude(b);
 
+        let [x0, x1, x2, x3, x4] = nutation::fundamental_arguments(jce);
         let (delta_psi, delta_epsilon) = nutation::nutation_in_longitude_and_obliquity(jce);
-        let epsilon = obliquity::true_obliquity_of_ecliptic(jme, delta_epsilon);
+        // Evaluate equation 24 once and apply equation 25 inline so the
+        // Horner sweep of the ε₀ polynomial is not duplicated here.
+        let epsilon0_arcseconds = obliquity::mean_obliquity_of_ecliptic_arcseconds(jme);
+        let epsilon = epsilon0_arcseconds / 3600.0 + delta_epsilon;
 
         let delta_tau = apparent::aberration_correction(r);
         let lambda = apparent::apparent_sun_longitude(theta, delta_psi, delta_tau);
@@ -266,10 +300,12 @@ impl SolarPosition {
         );
         let delta_e =
             horizontal::atmospheric_refraction(e0, observer.pressure, observer.temperature);
+        let e_corrected = horizontal::topocentric_elevation_corrected(e0, delta_e);
         let zenith = horizontal::topocentric_zenith_angle(e0, delta_e);
 
         let gamma =
             horizontal::astronomers_azimuth(h_prime, observer.latitude, topocentric.declination);
+        let gamma_signed = horizontal::astronomers_azimuth_signed(gamma);
         let azimuth = horizontal::topocentric_azimuth_angle(gamma);
 
         let incidence_angle = incidence::surface_incidence_angle(
@@ -293,8 +329,14 @@ impl SolarPosition {
             earth_radius_vector: r,
             geocentric_longitude: theta,
             geocentric_latitude: beta,
+            mean_elongation_moon_sun: x0,
+            mean_anomaly_sun: x1,
+            mean_anomaly_moon: x2,
+            argument_latitude_moon: x3,
+            ascending_longitude_moon: x4,
             nutation_in_longitude: delta_psi,
             nutation_in_obliquity: delta_epsilon,
+            mean_obliquity_arcseconds: epsilon0_arcseconds,
             true_obliquity: epsilon,
             aberration_correction: delta_tau,
             apparent_sun_longitude: lambda,
@@ -310,8 +352,10 @@ impl SolarPosition {
             topocentric_local_hour_angle: h_prime,
             topocentric_elevation_unrefracted: e0,
             atmospheric_refraction: delta_e,
+            topocentric_elevation_corrected: e_corrected,
             topocentric_zenith: zenith,
             astronomers_azimuth: gamma,
+            astronomers_azimuth_signed: gamma_signed,
             topocentric_azimuth: azimuth,
             surface_incidence: incidence_angle,
             equation_of_time: eot,
@@ -358,6 +402,23 @@ impl fmt::Display for SolarPosition {
         )?;
         writeln!(
             f,
+            "Mean elongation (moon-sun) X₀: {}°",
+            self.mean_elongation_moon_sun
+        )?;
+        writeln!(f, "Mean anomaly (sun) X₁: {}°", self.mean_anomaly_sun)?;
+        writeln!(f, "Mean anomaly (moon) X₂: {}°", self.mean_anomaly_moon)?;
+        writeln!(
+            f,
+            "Argument latitude (moon) X₃: {}°",
+            self.argument_latitude_moon
+        )?;
+        writeln!(
+            f,
+            "Ascending longitude (moon) X₄: {}°",
+            self.ascending_longitude_moon
+        )?;
+        writeln!(
+            f,
             "Nutation in longitude Δψ: {}°",
             self.nutation_in_longitude
         )?;
@@ -365,6 +426,11 @@ impl fmt::Display for SolarPosition {
             f,
             "Nutation in obliquity Δε: {}°",
             self.nutation_in_obliquity
+        )?;
+        writeln!(
+            f,
+            "Ecliptic mean obliquity ε₀: {}\"",
+            self.mean_obliquity_arcseconds
         )?;
         writeln!(
             f,
@@ -443,6 +509,11 @@ impl fmt::Display for SolarPosition {
         )?;
         writeln!(
             f,
+            "Topocentric elevation (corrected) e: {}°",
+            self.topocentric_elevation_corrected
+        )?;
+        writeln!(
+            f,
             "Topocentric zenith angle θ: {}°",
             self.topocentric_zenith
         )?;
@@ -450,6 +521,11 @@ impl fmt::Display for SolarPosition {
             f,
             "Topocentric astronomers' azimuth Γ: {}°",
             self.astronomers_azimuth
+        )?;
+        writeln!(
+            f,
+            "Topocentric azimuth (westward from south, signed) Γ′: {}°",
+            self.astronomers_azimuth_signed
         )?;
         writeln!(f, "Topocentric azimuth Φ: {}°", self.topocentric_azimuth)?;
         writeln!(f, "Surface incidence angle I: {}°", self.surface_incidence)?;
@@ -586,7 +662,16 @@ mod tests {
             position.nutation_in_obliquity,
         );
 
-        // Section 3.5 — True obliquity of the ecliptic.
+        // Section 3.5 — Mean and true obliquity of the ecliptic.
+        // ε₀ in arc seconds is back-derived from `(ε - Δε) · 3600` to a
+        // ~0.1" tolerance: rounding to the published 1e-6° on `ε` and
+        // 1e-8° on `Δε` allows roughly 0.07" of slack in the round-trip.
+        let epsilon0_via_round_trip = (23.440_465_f64 - 0.001_666_57) * 3600.0;
+        assert!(
+            (position.mean_obliquity_arcseconds - epsilon0_via_round_trip).abs() < 0.1,
+            "ε₀ mismatch: got {}\" vs round-trip {epsilon0_via_round_trip}\"",
+            position.mean_obliquity_arcseconds,
+        );
         assert!(
             (position.true_obliquity - 23.440_465).abs() < 1e-6,
             "ε mismatch: got {}",
@@ -656,10 +741,28 @@ mod tests {
             "θ mismatch: got {}",
             position.topocentric_zenith,
         );
+        // The corrected elevation `e = e₀ + Δe` must equal `90° − θ`
+        // exactly, since equation 44 is `θ = 90° − e`. Pinning the
+        // published `θ` therefore implies the corrected elevation
+        // matches the published `90° − θ ≈ 39.88838°`.
+        assert!(
+            (position.topocentric_elevation_corrected - (90.0_f64 - 50.111_62)).abs() < 1e-4,
+            "e (corrected) mismatch: got {}",
+            position.topocentric_elevation_corrected,
+        );
         assert!(
             (position.astronomers_azimuth - 14.340_24).abs() < 1e-4,
             "Γ mismatch: got {}",
             position.astronomers_azimuth,
+        );
+        // The signed astronomers' azimuth must be the identity of `Γ`
+        // for `Γ ≤ 180°` (the published reference value sits at
+        // `~14.34°`). A regression that flipped the sign or shifted by
+        // `±360°` would surface here.
+        assert!(
+            (position.astronomers_azimuth_signed - 14.340_24).abs() < 1e-4,
+            "Γ′ (signed) mismatch: got {}",
+            position.astronomers_azimuth_signed,
         );
         assert!(
             (position.topocentric_azimuth - 194.340_24).abs() < 1e-4,
@@ -682,20 +785,24 @@ mod tests {
         );
     }
 
-    /// The nine struct fields whose values the paper does not publish
-    /// directly — `JDE`, `JC`, `JCE`, `JME`, `Δτ`, `ξ`, `Δα`, `e₀`, `Δe` —
-    /// must each equal the result of calling the underlying section
-    /// function with the same inputs the orchestrator feeds it. This
-    /// guards against a struct-field swap between two such intermediates,
-    /// which the published-values test above cannot detect because none
-    /// of these quantities appear in the paper's Table A5.1. Bitwise
-    /// equality is required: the orchestrator and the test re-invoke the
-    /// same section functions, so any difference is a wiring bug rather
-    /// than rounding.
+    /// The struct fields whose values the paper does not publish
+    /// directly — `JDE`, `JC`, `JCE`, `JME`, `Δτ`, `ξ`, `Δα`, `e₀`, `Δe`
+    /// plus the five fundamental angles `X₀..X₄`, the mean obliquity
+    /// `ε₀` (in arc seconds), the corrected elevation `e` and the signed
+    /// astronomers' azimuth `Γ′` — must each equal the result of calling
+    /// the underlying section function with the same inputs the
+    /// orchestrator feeds it. This guards against a struct-field swap
+    /// between two such intermediates, which the published-values test
+    /// above cannot detect because none of these quantities appear in
+    /// the paper's Table A5.1. Bitwise equality is required: the
+    /// orchestrator and the test re-invoke the same section functions,
+    /// so any difference is a wiring bug rather than rounding.
     #[test]
     #[allow(clippy::float_cmp)]
     fn compute_wires_unpublished_intermediates_to_their_section_functions() {
-        use crate::{apparent, equation_of_time, horizontal, julian, parallax};
+        use crate::{
+            apparent, equation_of_time, horizontal, julian, nutation, obliquity, parallax,
+        };
 
         let dt = reference_datetime();
         let observer = reference_observer();
@@ -719,6 +826,30 @@ mod tests {
         assert_eq!(
             position.julian_ephemeris_millennium, jme,
             "JME field swapped",
+        );
+
+        // Section 3.4 fundamental angles: each X_k is exposed as its own
+        // SolarPosition field. Pin them all against the public
+        // `fundamental_arguments(jce)` so a transposition of the five
+        // outputs (e.g. swapping X₂ and X₃ in the struct literal, both
+        // around 18_000° at the reference instant) cannot hide behind
+        // the (Δψ, Δε) reference test that doesn't depend on the
+        // surfaced field order.
+        let [x0, x1, x2, x3, x4] = nutation::fundamental_arguments(jce);
+        assert_eq!(position.mean_elongation_moon_sun, x0, "X₀ field swapped");
+        assert_eq!(position.mean_anomaly_sun, x1, "X₁ field swapped");
+        assert_eq!(position.mean_anomaly_moon, x2, "X₂ field swapped");
+        assert_eq!(position.argument_latitude_moon, x3, "X₃ field swapped");
+        assert_eq!(position.ascending_longitude_moon, x4, "X₄ field swapped");
+
+        // Section 3.5 mean obliquity `ε₀` (arc seconds): the published
+        // Table A5.1 only lists `ε` in degrees, so the only way to pin
+        // `ε₀` is against the `mean_obliquity_of_ecliptic_arcseconds`
+        // section function.
+        assert_eq!(
+            position.mean_obliquity_arcseconds,
+            obliquity::mean_obliquity_of_ecliptic_arcseconds(jme),
+            "ε₀ field swapped or unit-converted",
         );
 
         // Aberration `Δτ` and equatorial horizontal parallax `ξ` both
@@ -767,11 +898,29 @@ mod tests {
         );
         let delta_e =
             horizontal::atmospheric_refraction(e0, observer.pressure, observer.temperature);
+        let e_corrected = horizontal::topocentric_elevation_corrected(e0, delta_e);
         assert_eq!(
             position.topocentric_elevation_unrefracted, e0,
             "e₀ field swapped",
         );
         assert_eq!(position.atmospheric_refraction, delta_e, "Δe field swapped");
+        assert_eq!(
+            position.topocentric_elevation_corrected, e_corrected,
+            "e (corrected) field swapped",
+        );
+
+        // Signed astronomers' azimuth `Γ′` must equal the published
+        // `Γ ∈ [0°, 360°)` wrapped through `astronomers_azimuth_signed`.
+        // A swap with `Γ` (which itself is published in the unsigned
+        // form) would survive at the reference instant because both
+        // values agree there (Γ ≈ 14.34°), so this test exists to pin
+        // the wiring at any future instant whose `Γ` lands in the upper
+        // half.
+        assert_eq!(
+            position.astronomers_azimuth_signed,
+            horizontal::astronomers_azimuth_signed(position.astronomers_azimuth),
+            "Γ′ field swapped or wrap convention changed",
+        );
 
         // `equation_of_time::sun_mean_longitude` is not exposed on the
         // struct, but the equation-of-time output must match the
