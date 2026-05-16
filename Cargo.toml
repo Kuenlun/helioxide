@@ -6,6 +6,8 @@ description = "Rust implementation of NREL Solar Position Algorithm (SPA)"
 repository = "https://github.com/Kuenlun/helioxide"
 authors = ["Juan Luis Leal Contreras <kuenlunleal@gmail.com>"]
 license = "MIT OR Apache-2.0"
+keywords = ["solar", "spa", "astronomy", "sun", "nrel"]
+categories = ["science", "mathematics"]
 
 [dependencies]
 chrono = "0.4.44"
