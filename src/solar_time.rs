@@ -293,7 +293,7 @@ pub const fn delta_t_corrected_event_time(
 /// `value₊₁`; at `nᵢ = -1` to `value₋₁`.
 ///
 /// Per step A.2.10, differences whose magnitude exceeds
-/// [`INTERPOLATION_WRAP_THRESHOLD_DEGREES`] are taken to be a `360°`
+/// `INTERPOLATION_WRAP_THRESHOLD_DEGREES` are taken to be a `360°`
 /// wrap of the underlying angle and folded back into `(-180°, 180°]`
 /// before the Stirling sum: this only fires for `α` near the vernal
 /// equinox (when the wrap from `~360°` to `~0°` makes `b ≈ -359°`),
@@ -314,7 +314,7 @@ pub fn interpolate_three_day_value(
 }
 
 /// Wrap an interpolation difference into `(-180°, 180°]` per step
-/// A.2.10. Differences smaller than [`INTERPOLATION_WRAP_THRESHOLD_DEGREES`]
+/// A.2.10. Differences smaller than `INTERPOLATION_WRAP_THRESHOLD_DEGREES`
 /// pass through untouched (they cannot be a `360°` wrap of the
 /// underlying angle since the natural diurnal motion is bounded by
 /// `~1°/day`); larger differences are reduced to the closest
