@@ -4,11 +4,8 @@
 
 use chrono::Utc;
 use chrono_tz::Tz;
+use helioxide::delta_t::approximate_delta_t_seconds_for_datetime;
 use helioxide::{Observer, SolarDay, SolarPosition, SpaDateTime, Surface};
-
-/// Approximate ΔT value in seconds for years around 2026. Update as
-/// needed for more accurate calculations (consult IERS bulletins).
-const DELTA_T: f64 = 69.5;
 
 /// Example observer site: Alicante.
 const OBSERVER: Observer = Observer {
@@ -32,9 +29,14 @@ fn main() {
     // Alicante is the observer, so Europe/Madrid keeps sunrise, transit
     // and sunset on the same calendar date as Alicante's clock.
     let now = SpaDateTime::new(Utc::now().with_timezone(&Tz::Europe__Madrid));
-    let position = SolarPosition::compute(&now, DELTA_T, OBSERVER, SURFACE);
-    let day = SolarDay::compute(&now, DELTA_T, OBSERVER);
+    // Espenak-Meeus piecewise polynomial: tracks the current IERS ΔT
+    // within a handful of seconds across `2005-2050` without any
+    // bulletin lookup, and degrades gracefully outside that window.
+    let delta_t = approximate_delta_t_seconds_for_datetime(now.datetime());
+    let position = SolarPosition::compute(&now, delta_t, OBSERVER, SURFACE);
+    let day = SolarDay::compute(&now, delta_t, OBSERVER);
     println!("Now: {now:?}");
+    println!("ΔT: {delta_t:.3} s");
     println!("{position}");
     println!("{day}");
 }
