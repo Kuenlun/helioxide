@@ -527,13 +527,8 @@ impl<Tz: TimeZone> SolarDay<Tz> {
     /// use chrono_tz::Tz;
     /// use helioxide::{Observer, SolarDay, SpaDateTime};
     ///
-    /// let observer = Observer {
-    ///     longitude: -0.490_68,
-    ///     latitude: 38.346_02,
-    ///     elevation: 3.0,
-    ///     pressure: 1015.0,
-    ///     temperature: 18.0,
-    /// };
+    /// let observer = Observer::try_new(38.346_02, -0.490_68, 3.0, 1015.0, 18.0)
+    ///     .expect("validated observer");
     /// let now = SpaDateTime::new(Utc::now().with_timezone(&Tz::Europe__Madrid));
     /// let day = SolarDay::compute(&now, 69.5, observer);
     /// println!("Solar noon: {}", day.transit);
@@ -545,10 +540,7 @@ impl<Tz: TimeZone> SolarDay<Tz> {
     /// ```
     /// use chrono::{NaiveDate, TimeZone, Utc};
     /// use helioxide::{Observer, SolarDay, SpaDateTime};
-    /// # let observer = Observer {
-    /// #     longitude: -0.490_68, latitude: 38.346_02,
-    /// #     elevation: 3.0, pressure: 1015.0, temperature: 18.0,
-    /// # };
+    /// # let observer = Observer::try_new(38.346_02, -0.490_68, 3.0, 1015.0, 18.0).unwrap();
     /// let noon_utc =
     ///     SpaDateTime::new(Utc.with_ymd_and_hms(2003, 10, 17, 12, 0, 0).unwrap());
     /// let day = SolarDay::compute(&noon_utc, 67.0, observer);
@@ -586,11 +578,11 @@ impl<Tz: TimeZone> SolarDay<Tz> {
         let (alpha_plus, delta_plus) = right_ascension_and_declination(jde_0 + 1.0);
 
         // Step A.2.3 — m₀.
-        let m_0 = approximate_sun_transit_time(alpha_zero, observer.longitude, nu);
+        let m_0 = approximate_sun_transit_time(alpha_zero, observer.longitude(), nu);
 
         // Step A.2.4 — H₀ (None for polar day/night).
         let h_0 = sunrise_sunset_local_hour_angle(
-            observer.latitude,
+            observer.latitude(),
             delta_zero,
             SUN_ELEVATION_AT_HORIZON_DEGREES,
         );
@@ -662,7 +654,7 @@ impl<Tz: TimeZone> SolarDay<Tz> {
         // `H' ≈ 0°`, so this is essentially `arcsin(sin φ · sin δ' +
         // cos φ · cos δ')`, the upper-culmination altitude.
         let sun_transit_altitude = sun_altitude_at_event(
-            observer.latitude,
+            observer.latitude(),
             transit_event.interpolated_declination,
             transit_event.local_hour_angle,
         );
@@ -753,18 +745,18 @@ fn refined_event_fraction_of_day(
     let (delta_minus, delta_zero, delta_plus) = delta_three_day;
     let alpha_prime = interpolate_three_day_value(alpha_minus, alpha_zero, alpha_plus, n_i);
     let delta_prime = interpolate_three_day_value(delta_minus, delta_zero, delta_plus, n_i);
-    let h_prime = event_local_hour_angle(nu_i, observer.longitude, alpha_prime);
+    let h_prime = event_local_hour_angle(nu_i, observer.longitude(), alpha_prime);
 
     let fraction_of_day = match kind {
         EventKind::Transit => sun_transit_time(m, h_prime),
         EventKind::Sunrise | EventKind::Sunset => {
-            let h_at_event = sun_altitude_at_event(observer.latitude, delta_prime, h_prime);
+            let h_at_event = sun_altitude_at_event(observer.latitude(), delta_prime, h_prime);
             sunrise_or_sunset_time(
                 m,
                 h_at_event,
                 SUN_ELEVATION_AT_HORIZON_DEGREES,
                 delta_prime,
-                observer.latitude,
+                observer.latitude(),
                 h_prime,
             )
         }
@@ -871,13 +863,14 @@ mod tests {
     }
 
     fn reference_observer() -> Observer {
-        Observer {
-            longitude: REFERENCE_LONGITUDE_DEGREES,
-            latitude: REFERENCE_LATITUDE_DEGREES,
-            elevation: REFERENCE_ELEVATION_METRES,
-            pressure: REFERENCE_PRESSURE_MILLIBARS,
-            temperature: REFERENCE_TEMPERATURE_CELSIUS,
-        }
+        Observer::try_new(
+            REFERENCE_LATITUDE_DEGREES,
+            REFERENCE_LONGITUDE_DEGREES,
+            REFERENCE_ELEVATION_METRES,
+            REFERENCE_PRESSURE_MILLIBARS,
+            REFERENCE_TEMPERATURE_CELSIUS,
+        )
+        .expect("reference observer at the A5.1 reference site is valid by construction")
     }
 
     /// Civil instant of the Table A5.1 worked example: 2003-10-17
@@ -1108,13 +1101,8 @@ mod tests {
                 .single()
                 .expect("noon is unambiguous on the fall-back date"),
         );
-        let observer = Observer {
-            longitude: -25.668,
-            latitude: 37.741,
-            elevation: 50.0,
-            pressure: 1015.0,
-            temperature: 18.0,
-        };
+        let observer = Observer::try_new(37.741, -25.668, 50.0, 1015.0, 18.0)
+            .expect("Azores observer must validate");
         let day = SolarDay::compute(&dt, REFERENCE_DELTA_T_SECONDS, observer);
         let sunrise = day
             .sunrise
@@ -1152,13 +1140,8 @@ mod tests {
                 .single()
                 .expect("noon is unambiguous on the spring-forward date"),
         );
-        let observer = Observer {
-            longitude: -46.625,
-            latitude: -23.533,
-            elevation: 760.0,
-            pressure: 1010.0,
-            temperature: 22.0,
-        };
+        let observer = Observer::try_new(-23.533, -46.625, 760.0, 1010.0, 22.0)
+            .expect("Sao Paulo observer must validate");
         let day = SolarDay::compute(&dt, REFERENCE_DELTA_T_SECONDS, observer);
         let sunrise = day
             .sunrise
@@ -1216,13 +1199,8 @@ mod tests {
     /// either a finite sunrise/sunset or a panic.
     #[test]
     fn solar_day_polar_night_returns_none_for_sunrise_and_sunset() {
-        let polar = Observer {
-            longitude: 0.0,
-            latitude: 80.0,
-            elevation: 0.0,
-            pressure: 1010.0,
-            temperature: -20.0,
-        };
+        let polar = Observer::try_new(80.0, 0.0, 0.0, 1010.0, -20.0)
+            .expect("polar-night observer must validate");
         let solstice = SpaDateTime::new(
             Utc.with_ymd_and_hms(2026, 12, 21, 12, 0, 0)
                 .single()
@@ -1249,13 +1227,8 @@ mod tests {
     /// midwinter test passes pins which arm regressed.
     #[test]
     fn solar_day_polar_day_returns_none_for_sunrise_and_sunset() {
-        let polar = Observer {
-            longitude: 0.0,
-            latitude: 80.0,
-            elevation: 0.0,
-            pressure: 1010.0,
-            temperature: 0.0,
-        };
+        let polar = Observer::try_new(80.0, 0.0, 0.0, 1010.0, 0.0)
+            .expect("polar-day observer must validate");
         let solstice = SpaDateTime::new(
             Utc.with_ymd_and_hms(2026, 6, 21, 12, 0, 0)
                 .single()
@@ -1748,9 +1721,9 @@ mod tests {
         let (alpha_zero, delta_zero) = right_ascension_and_declination(jde_0);
         let (alpha_plus, delta_plus) = right_ascension_and_declination(jde_0 + 1.0);
 
-        let m_0 = approximate_sun_transit_time(alpha_zero, observer.longitude, nu);
+        let m_0 = approximate_sun_transit_time(alpha_zero, observer.longitude(), nu);
         let h_0 = sunrise_sunset_local_hour_angle(
-            observer.latitude,
+            observer.latitude(),
             delta_zero,
             SUN_ELEVATION_AT_HORIZON_DEGREES,
         )
@@ -1860,13 +1833,8 @@ mod tests {
     #[test]
     fn solar_day_unwraps_sunrise_to_previous_ut_day_for_east_longitude_observer() {
         // Observer near Sydney (+150° E) at the autumn equinox.
-        let observer = Observer {
-            longitude: 150.0,
-            latitude: -33.8,
-            elevation: 0.0,
-            pressure: 1010.0,
-            temperature: 18.0,
-        };
+        let observer = Observer::try_new(-33.8, 150.0, 0.0, 1010.0, 18.0)
+            .expect("Sydney observer must validate");
         let utc_noon = SpaDateTime::new(
             Utc.with_ymd_and_hms(2026, 3, 20, 12, 0, 0)
                 .single()

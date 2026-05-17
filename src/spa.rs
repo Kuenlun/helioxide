@@ -19,6 +19,7 @@
 use core::fmt;
 
 use chrono::TimeZone;
+use thiserror::Error;
 
 use crate::{
     SpaDateTime, apparent, equation_of_time, equatorial, geocentric, heliocentric, horizontal,
@@ -27,24 +28,31 @@ use crate::{
 
 /// Geographic and atmospheric description of the observation site.
 ///
-/// `longitude` and `latitude` follow the conventions of sections 3.11 and
+/// Latitude and longitude follow the conventions of sections 3.11 and
 /// 3.12.2: positive east of Greenwich and positive north of the equator,
-/// respectively. `elevation` is the observer height above sea level
-/// (metres), consumed by section 3.12.3. `pressure` (millibars) and
-/// `temperature` (degrees Celsius) feed the atmospheric refraction model
+/// respectively. Elevation is the observer height above sea level
+/// (metres), consumed by section 3.12.3. Pressure (millibars) and
+/// temperature (degrees Celsius) feed the atmospheric refraction model
 /// of equation 42 and should be annual averages for the site.
 ///
-/// Two reference atmospheres are exposed as `pub const` values for callers
-/// without local annual averages on hand:
+/// Fields are private: every value reaches the SPA pipeline through one
+/// of the validating constructors below, so a downstream `compute` call
+/// can never observe NaN, an infinity, an off-equator latitude, a
+/// non-physical pressure, or a temperature at or below equation 42's
+/// `T = -273 °C` singularity. Read the stored values back with the
+/// per-field accessors ([`Self::latitude`], [`Self::longitude`],
+/// [`Self::elevation`], [`Self::pressure`], [`Self::temperature`]).
+///
+/// Two reference atmospheres are exposed as `pub const` values for
+/// callers without local annual averages on hand:
 ///
 /// * The ICAO/ISA sea-level standard atmosphere
 ///   ([`ISA_PRESSURE_MILLIBARS`], [`ISA_TEMPERATURE_CELSIUS`]):
 ///   `1013.25 mbar`, `15 °C`. The industry-wide aeronautical default and
 ///   the recommended choice when no local meteorological data is
-///   available. The convenience constructor [`Observer::at_sea_level_isa`]
-///   fills both fields from these constants and pins `elevation` at `0 m`;
-///   [`Observer::default`] does the same with `latitude` and `longitude`
-///   left at zero so callers can use struct-update syntax.
+///   available. The convenience constructor
+///   [`Observer::try_at_sea_level_isa`] fills both fields from these
+///   constants and pins `elevation` at `0 m`.
 /// * The SPA paper's calibration atmosphere
 ///   ([`REFERENCE_PRESSURE_MILLIBARS`], [`REFERENCE_TEMPERATURE_CELSIUS`]):
 ///   `1010 mbar`, `10 °C` (`283 K`). At these values, both ratios in
@@ -52,17 +60,15 @@ use crate::{
 ///   `Δe = 1.02 / (60 · tan(e₀ + 10.3/(e₀ + 5.11)))`. Pick this only when
 ///   reproducing the appendix A.5 worked example (the published Table
 ///   A5.1 values were computed at this atmosphere). The convenience
-///   constructor [`Observer::with_reference_atmosphere`] fills both fields
-///   from these constants. The ISA atmosphere above scales equation 42's
-///   `Δe` by a constant factor of `~0.986` relative to this one (the
-///   formula is linear in both ratios).
+///   constructor [`Observer::try_with_reference_atmosphere`] fills both
+///   fields from these constants. The ISA atmosphere above scales
+///   equation 42's `Δe` by a constant factor of `~0.986` relative to
+///   this one (the formula is linear in both ratios).
 ///
-/// [`SolarPosition::compute`] is the sole consumer of `pressure` and
-/// `temperature`. [`SolarDay::compute`] ignores them because appendix A.2
+/// [`SolarPosition::compute`] is the sole consumer of pressure and
+/// temperature. [`SolarDay::compute`] ignores them because appendix A.2
 /// absorbs the average horizon-level refraction into the constant
-/// `-0.8333°`. A nonsense value (zero, NaN) in either of these two fields
-/// therefore corrupts the topocentric elevation [`SolarPosition::compute`]
-/// returns without affecting the sunrise / sunset / transit times.
+/// `-0.8333°`.
 ///
 /// [`REFERENCE_PRESSURE_MILLIBARS`]: Observer::REFERENCE_PRESSURE_MILLIBARS
 /// [`REFERENCE_TEMPERATURE_CELSIUS`]: Observer::REFERENCE_TEMPERATURE_CELSIUS
@@ -71,26 +77,19 @@ use crate::{
 /// [`SolarDay::compute`]: crate::SolarDay::compute
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Observer {
-    /// Geographic longitude `σ` (degrees, signed, positive east of
-    /// Greenwich).
-    pub longitude: f64,
-    /// Geographic latitude `φ` (degrees, signed, positive north of the
-    /// equator).
-    pub latitude: f64,
-    /// Elevation above sea level `E` (metres).
-    pub elevation: f64,
-    /// Annual average atmospheric pressure `P` (millibars).
-    pub pressure: f64,
-    /// Annual average atmospheric temperature `T` (degrees Celsius).
-    pub temperature: f64,
+    longitude: f64,
+    latitude: f64,
+    elevation: f64,
+    pressure: f64,
+    temperature: f64,
 }
 
 impl Observer {
     /// SPA paper reference pressure (millibars).
     ///
     /// Reproduced verbatim from equation 42 of NREL/TP-560-34302: setting
-    /// [`Self::pressure`] to this value collapses the `(P / 1010)` ratio
-    /// in the refraction formula to one. Identical to the literal used
+    /// pressure to this value collapses the `(P / 1010)` ratio in the
+    /// refraction formula to one. Identical to the literal used
     /// internally by [`atmospheric_refraction`].
     ///
     /// [`atmospheric_refraction`]: crate::horizontal::atmospheric_refraction
@@ -99,8 +98,8 @@ impl Observer {
     /// SPA paper reference temperature (degrees Celsius).
     ///
     /// Equivalent to `283 K`, the numerator of the temperature ratio in
-    /// equation 42: setting [`Self::temperature`] to this value collapses
-    /// the `(283 / (273 + T))` ratio to one.
+    /// equation 42: setting temperature to this value collapses the
+    /// `(283 / (273 + T))` ratio to one.
     pub const REFERENCE_TEMPERATURE_CELSIUS: f64 =
         horizontal::REFERENCE_TEMPERATURE_KELVIN - horizontal::KELVIN_OFFSET_FROM_CELSIUS;
 
@@ -122,110 +121,344 @@ impl Observer {
     /// factor.
     pub const ISA_TEMPERATURE_CELSIUS: f64 = 15.0;
 
-    /// Construct an observer using the SPA paper's reference atmosphere
+    /// Open lower bound on the observer temperature (degrees Celsius).
+    ///
+    /// Equation 42's denominator `273 + T` vanishes at `T = -273 °C`
+    /// exactly, so [`Self::try_new`] rejects any temperature at or below
+    /// this value. The bound mirrors the paper's `273 + T` constant
+    /// rather than the strict IAU `-273.15 °C` of absolute zero (the
+    /// `0.15 °C` gap is below the trailing digit of equation 42 at every
+    /// pressure and elevation reproduced in appendix A.5).
+    pub const TEMPERATURE_FLOOR_CELSIUS_EXCLUSIVE: f64 = -horizontal::KELVIN_OFFSET_FROM_CELSIUS;
+
+    /// Build an observer with explicit atmosphere, validating every
+    /// argument before assembling the struct.
+    ///
+    /// Argument order follows the universal `(latitude, longitude)`
+    /// geographic convention. Each value is checked against the
+    /// preconditions of the SPA pipeline; the first failed check wins
+    /// and the rest are short-circuited.
+    ///
+    /// # Errors
+    /// Returns the matching [`ObserverError`] variant when one of the
+    /// inputs is non-finite or out of its admissible range:
+    ///
+    /// * `latitude` must lie in `[-90°, 90°]` and be finite, per section
+    ///   3.12.2.
+    /// * `longitude` must lie in `[-180°, 180°]` and be finite, per
+    ///   section 3.11.
+    /// * `elevation` must be finite (metres above sea level, per section
+    ///   3.12.3; no range is imposed because the parallax correction
+    ///   stays well behaved for any physically meaningful altitude).
+    /// * `pressure` must be finite and strictly positive (millibars):
+    ///   equation 42's pressure ratio `P / 1010` is undefined for
+    ///   non-positive inputs.
+    /// * `temperature` must be finite and strictly above
+    ///   [`Self::TEMPERATURE_FLOOR_CELSIUS_EXCLUSIVE`] (degrees Celsius):
+    ///   equation 42's denominator `273 + T` vanishes at the boundary.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use helioxide::Observer;
+    ///
+    /// // Alicante: lat 38.346°N, lon 0.490°W, 3 m elevation, 1015 mbar, 18 °C.
+    /// let obs = Observer::try_new(38.346_02, -0.490_68, 3.0, 1015.0, 18.0).unwrap();
+    /// assert_eq!(obs.latitude(), 38.346_02);
+    /// assert_eq!(obs.longitude(), -0.490_68);
+    /// ```
+    #[inline]
+    pub fn try_new(
+        latitude: f64,
+        longitude: f64,
+        elevation: f64,
+        pressure: f64,
+        temperature: f64,
+    ) -> Result<Self, ObserverError> {
+        if !latitude.is_finite() || !(-90.0..=90.0).contains(&latitude) {
+            return Err(ObserverError::InvalidLatitude(latitude));
+        }
+        if !longitude.is_finite() || !(-180.0..=180.0).contains(&longitude) {
+            return Err(ObserverError::InvalidLongitude(longitude));
+        }
+        if !elevation.is_finite() {
+            return Err(ObserverError::InvalidElevation(elevation));
+        }
+        if !pressure.is_finite() || pressure <= 0.0 {
+            return Err(ObserverError::InvalidPressure(pressure));
+        }
+        if !temperature.is_finite() || temperature <= Self::TEMPERATURE_FLOOR_CELSIUS_EXCLUSIVE {
+            return Err(ObserverError::InvalidTemperature(temperature));
+        }
+        Ok(Self {
+            longitude,
+            latitude,
+            elevation,
+            pressure,
+            temperature,
+        })
+    }
+
+    /// Build an observer using the SPA paper's reference atmosphere
     /// (`1010 mbar`, `10 °C`).
     ///
     /// Pick this only when reproducing the appendix worked examples. The
     /// refraction correction of equation 42 reduces to
     /// `Δe = 1.02 / (60 · tan(e₀ + 10.3/(e₀ + 5.11)))` at this atmosphere,
     /// matching the values published in Table A5.1. For ordinary use with
-    /// no local meteorological data prefer [`Self::at_sea_level_isa`]
-    /// instead. `elevation` is the observer height above sea level
-    /// (metres), consumed by section 3.12.3's parallax correction.
+    /// no local meteorological data prefer [`Self::try_at_sea_level_isa`]
+    /// instead.
+    ///
+    /// # Errors
+    /// Returns the same [`ObserverError`] variants as [`Self::try_new`]
+    /// would for `latitude`, `longitude`, and `elevation`. The two
+    /// atmospheric fields are pinned to the paper's calibration
+    /// constants and therefore never fail validation.
     ///
     /// # Examples
     ///
     /// ```
     /// use helioxide::Observer;
     ///
-    /// let obs = Observer::with_reference_atmosphere(38.346_02, -0.490_68, 3.0);
-    /// assert_eq!(obs.pressure, Observer::REFERENCE_PRESSURE_MILLIBARS);
-    /// assert_eq!(obs.temperature, Observer::REFERENCE_TEMPERATURE_CELSIUS);
+    /// let obs = Observer::try_with_reference_atmosphere(38.346_02, -0.490_68, 3.0).unwrap();
+    /// assert_eq!(obs.pressure(), Observer::REFERENCE_PRESSURE_MILLIBARS);
+    /// assert_eq!(obs.temperature(), Observer::REFERENCE_TEMPERATURE_CELSIUS);
     /// ```
     #[inline]
-    #[must_use]
-    pub const fn with_reference_atmosphere(latitude: f64, longitude: f64, elevation: f64) -> Self {
-        Self {
-            longitude,
+    pub fn try_with_reference_atmosphere(
+        latitude: f64,
+        longitude: f64,
+        elevation: f64,
+    ) -> Result<Self, ObserverError> {
+        Self::try_new(
             latitude,
+            longitude,
             elevation,
-            pressure: Self::REFERENCE_PRESSURE_MILLIBARS,
-            temperature: Self::REFERENCE_TEMPERATURE_CELSIUS,
-        }
+            Self::REFERENCE_PRESSURE_MILLIBARS,
+            Self::REFERENCE_TEMPERATURE_CELSIUS,
+        )
     }
 
-    /// Construct a sea-level observer using the ICAO/ISA standard
-    /// atmosphere (`1013.25 mbar`, `15 °C`, elevation `0 m`).
+    /// Build a sea-level observer using the ICAO/ISA standard atmosphere
+    /// (`1013.25 mbar`, `15 °C`, elevation `0 m`).
     ///
     /// The recommended default when the observer site is approximately at
     /// sea level and no local meteorological data is available. Diverges
-    /// from the SPA paper's reference by `+3.25 mbar` and `+5 °C`, scaling
-    /// equation 42's `Δe` by a constant factor of `~0.986` (the formula is
-    /// linear in both ratios).
+    /// from the SPA paper's reference by `+3.25 mbar` and `+5 °C`,
+    /// scaling equation 42's `Δe` by a constant factor of `~0.986` (the
+    /// formula is linear in both ratios).
+    ///
+    /// # Errors
+    /// Returns [`ObserverError::InvalidLatitude`] or
+    /// [`ObserverError::InvalidLongitude`] when the corresponding
+    /// argument is non-finite or out of range. The three remaining
+    /// fields (elevation, pressure, temperature) are pinned to the ISA
+    /// constants and therefore never fail validation.
     ///
     /// # Examples
     ///
     /// ```
     /// use helioxide::Observer;
     ///
-    /// let obs = Observer::at_sea_level_isa(40.0, -3.0);
-    /// assert_eq!(obs.elevation, 0.0);
-    /// assert_eq!(obs.pressure, Observer::ISA_PRESSURE_MILLIBARS);
-    /// assert_eq!(obs.temperature, Observer::ISA_TEMPERATURE_CELSIUS);
+    /// let obs = Observer::try_at_sea_level_isa(40.0, -3.0).unwrap();
+    /// assert_eq!(obs.elevation(), 0.0);
+    /// assert_eq!(obs.pressure(), Observer::ISA_PRESSURE_MILLIBARS);
+    /// assert_eq!(obs.temperature(), Observer::ISA_TEMPERATURE_CELSIUS);
     /// ```
     #[inline]
-    #[must_use]
-    pub const fn at_sea_level_isa(latitude: f64, longitude: f64) -> Self {
-        Self {
-            longitude,
+    pub fn try_at_sea_level_isa(latitude: f64, longitude: f64) -> Result<Self, ObserverError> {
+        Self::try_new(
             latitude,
-            elevation: 0.0,
-            pressure: Self::ISA_PRESSURE_MILLIBARS,
-            temperature: Self::ISA_TEMPERATURE_CELSIUS,
-        }
+            longitude,
+            0.0,
+            Self::ISA_PRESSURE_MILLIBARS,
+            Self::ISA_TEMPERATURE_CELSIUS,
+        )
+    }
+
+    /// Geographic latitude `φ` (degrees, signed, positive north of the
+    /// equator).
+    #[inline]
+    #[must_use]
+    pub const fn latitude(&self) -> f64 {
+        self.latitude
+    }
+
+    /// Geographic longitude `σ` (degrees, signed, positive east of
+    /// Greenwich).
+    #[inline]
+    #[must_use]
+    pub const fn longitude(&self) -> f64 {
+        self.longitude
+    }
+
+    /// Elevation above sea level `E` (metres).
+    #[inline]
+    #[must_use]
+    pub const fn elevation(&self) -> f64 {
+        self.elevation
+    }
+
+    /// Annual average atmospheric pressure `P` (millibars).
+    #[inline]
+    #[must_use]
+    pub const fn pressure(&self) -> f64 {
+        self.pressure
+    }
+
+    /// Annual average atmospheric temperature `T` (degrees Celsius).
+    #[inline]
+    #[must_use]
+    pub const fn temperature(&self) -> f64 {
+        self.temperature
     }
 }
 
-impl Default for Observer {
-    /// [`Self::at_sea_level_isa`] with `latitude = longitude = 0`.
-    ///
-    /// The four atmospheric and elevation fields come from the ICAO/ISA
-    /// sea-level standard; the two geographic fields default to zero so
-    /// callers can mix struct-update syntax with the constructor without
-    /// silently inheriting nonsense atmosphere values:
-    ///
-    /// ```
-    /// use helioxide::Observer;
-    ///
-    /// let obs = Observer { latitude: 40.0, longitude: -3.0, ..Default::default() };
-    /// assert_eq!(obs.pressure, Observer::ISA_PRESSURE_MILLIBARS);
-    /// assert_eq!(obs.temperature, Observer::ISA_TEMPERATURE_CELSIUS);
-    /// assert_eq!(obs.elevation, 0.0);
-    /// ```
-    #[inline]
-    fn default() -> Self {
-        Self::at_sea_level_isa(0.0, 0.0)
-    }
+/// Why an [`Observer`] could not be built.
+///
+/// Each variant carries the offending raw value so the caller can map it
+/// straight into a user-facing diagnostic without re-deriving which input
+/// was rejected. The five variants are mutually exclusive: the first
+/// failing field (in the order `latitude`, `longitude`, `elevation`,
+/// `pressure`, `temperature`) short-circuits [`Observer::try_new`].
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum ObserverError {
+    /// Latitude is non-finite or outside `[-90°, 90°]`.
+    #[error("latitude {0}° must lie in [-90°, 90°] and be finite")]
+    InvalidLatitude(f64),
+    /// Longitude is non-finite or outside `[-180°, 180°]`.
+    #[error("longitude {0}° must lie in [-180°, 180°] and be finite")]
+    InvalidLongitude(f64),
+    /// Elevation is non-finite.
+    #[error("elevation {0} m must be finite")]
+    InvalidElevation(f64),
+    /// Pressure is non-finite or not strictly positive.
+    #[error("pressure {0} mbar must be > 0 mbar and finite")]
+    InvalidPressure(f64),
+    /// Temperature is non-finite or at/below the `T = -273 °C` singularity
+    /// of equation 42.
+    #[error(
+        "temperature {0} °C must be > -273 °C and finite \
+         (equation 42's denominator 273 + T vanishes at -273 °C)"
+    )]
+    InvalidTemperature(f64),
 }
 
 /// Tilted surface (e.g. a fixed-tilt photovoltaic panel) consumed by the
 /// angle-of-incidence calculation in section 3.16.
 ///
-/// A horizontal collector is `Surface { slope: 0.0, azimuth_rotation: 0.0 }`;
-/// a vertical south-facing wall is `Surface { slope: 90.0, azimuth_rotation: 0.0 }`;
-/// a vertical west-facing wall is `Surface { slope: 90.0, azimuth_rotation: 90.0 }`;
-/// a vertical east-facing wall is `Surface { slope: 90.0, azimuth_rotation: -90.0 }`.
+/// Fields are private: every value reaches the SPA pipeline through one
+/// of the validating constructors below, so equation 47 can never be
+/// evaluated on NaN, an infinity, or a slope outside the geometrically
+/// meaningful `[0°, 180°]` range. Read the stored values back with
+/// [`Self::slope`] and [`Self::azimuth_rotation`].
+///
+/// A horizontal collector is [`Surface::horizontal`]; a vertical south
+/// facing wall is `Surface::try_new(90.0, 0.0)`; a vertical west facing
+/// wall is `Surface::try_new(90.0, 90.0)`; a vertical east facing wall
+/// is `Surface::try_new(90.0, -90.0)`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Surface {
+    slope: f64,
+    azimuth_rotation: f64,
+}
+
+impl Surface {
+    /// Build a tilted surface, validating both arguments before
+    /// assembling the struct.
+    ///
+    /// # Errors
+    /// Returns the matching [`SurfaceError`] variant when one of the
+    /// inputs is non-finite or out of its admissible range:
+    ///
+    /// * `slope` must lie in `[0°, 180°]` and be finite. Equation 47
+    ///   admits the full hemisphere from horizontal (`0°`) through
+    ///   vertical (`90°`) to an upside-down collector (`180°`); values
+    ///   outside this range have no geometric meaning.
+    /// * `azimuth_rotation` must lie in `[-180°, 180°]` and be finite.
+    ///   The astronomers' azimuth `Γ` that equation 47 differences this
+    ///   value against shares the same `westward from south` convention,
+    ///   so keeping `γ` inside `[-180°, 180°]` avoids ambiguity even
+    ///   though `cos(Γ − γ)` is periodic.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use helioxide::Surface;
+    ///
+    /// // South-facing fixed tilt at 38.35° (typical for southern Spain).
+    /// let surface = Surface::try_new(38.35, 0.0).unwrap();
+    /// assert_eq!(surface.slope(), 38.35);
+    /// ```
+    #[inline]
+    pub fn try_new(slope: f64, azimuth_rotation: f64) -> Result<Self, SurfaceError> {
+        if !slope.is_finite() || !(0.0..=180.0).contains(&slope) {
+            return Err(SurfaceError::InvalidSlope(slope));
+        }
+        if !azimuth_rotation.is_finite() || !(-180.0..=180.0).contains(&azimuth_rotation) {
+            return Err(SurfaceError::InvalidAzimuthRotation(azimuth_rotation));
+        }
+        Ok(Self {
+            slope,
+            azimuth_rotation,
+        })
+    }
+
+    /// A horizontal collector facing up (`slope = 0°, azimuth = 0°`).
+    ///
+    /// Infallible because both stored values are known-valid constants.
+    /// Pass this to [`SolarPosition::compute`] when no tilted surface is
+    /// of interest and only the topocentric solar position matters.
+    #[inline]
+    #[must_use]
+    pub const fn horizontal() -> Self {
+        Self {
+            slope: 0.0,
+            azimuth_rotation: 0.0,
+        }
+    }
+
     /// Slope from the horizontal plane `ω` (degrees; `0°` is horizontal,
     /// `90°` is vertical).
-    pub slope: f64,
+    #[inline]
+    #[must_use]
+    pub const fn slope(&self) -> f64 {
+        self.slope
+    }
+
     /// Surface azimuth rotation `γ` (degrees, signed, positive westward
     /// and negative eastward from due south; `0°` faces south). Matches
     /// the convention of the astronomers' azimuth `Γ` so that `Γ − γ`
     /// in equation 47 is the signed angular gap between the sun and the
     /// surface normal projected on the horizontal plane.
-    pub azimuth_rotation: f64,
+    #[inline]
+    #[must_use]
+    pub const fn azimuth_rotation(&self) -> f64 {
+        self.azimuth_rotation
+    }
+}
+
+impl Default for Surface {
+    /// Equivalent to [`Self::horizontal`].
+    #[inline]
+    fn default() -> Self {
+        Self::horizontal()
+    }
+}
+
+/// Why a [`Surface`] could not be built.
+///
+/// Each variant carries the offending raw value so the caller can map it
+/// straight into a user-facing diagnostic without re-deriving which input
+/// was rejected.
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum SurfaceError {
+    /// Slope is non-finite or outside `[0°, 180°]`.
+    #[error("slope {0}° must lie in [0°, 180°] and be finite")]
+    InvalidSlope(f64),
+    /// Azimuth rotation is non-finite or outside `[-180°, 180°]`.
+    #[error("azimuth rotation {0}° must lie in [-180°, 180°] and be finite")]
+    InvalidAzimuthRotation(f64),
 }
 
 /// Full output of the SPA pipeline.
@@ -384,14 +617,9 @@ impl SolarPosition {
     /// use chrono_tz::Tz;
     /// use helioxide::{Observer, SolarPosition, SpaDateTime, Surface};
     ///
-    /// let observer = Observer {
-    ///     longitude: -0.490_68,
-    ///     latitude: 38.346_02,
-    ///     elevation: 3.0,
-    ///     pressure: 1015.0,
-    ///     temperature: 18.0,
-    /// };
-    /// let surface = Surface { slope: 38.346_02, azimuth_rotation: 0.0 };
+    /// let observer = Observer::try_new(38.346_02, -0.490_68, 3.0, 1015.0, 18.0)
+    ///     .expect("validated observer");
+    /// let surface = Surface::try_new(38.346_02, 0.0).expect("validated surface");
     /// let now = SpaDateTime::new(Utc::now().with_timezone(&Tz::Europe__Madrid));
     /// let position = SolarPosition::compute(&now, 69.5, observer, surface);
     /// println!("Zenith: {}°", position.topocentric_zenith);
@@ -437,7 +665,7 @@ impl SolarPosition {
         let alpha = equatorial::geocentric_right_ascension(lambda, beta, epsilon);
         let delta = equatorial::geocentric_declination(lambda, beta, epsilon);
 
-        let h = hour_angle::observer_local_hour_angle(nu, observer.longitude, alpha);
+        let h = hour_angle::observer_local_hour_angle(nu, observer.longitude(), alpha);
 
         let xi = parallax::equatorial_horizontal_parallax(r);
         let topocentric = parallax::topocentric_equatorial_coordinates(
@@ -445,33 +673,33 @@ impl SolarPosition {
             delta,
             h,
             xi,
-            observer.latitude,
-            observer.elevation,
+            observer.latitude(),
+            observer.elevation(),
         );
 
         let h_prime =
             hour_angle::topocentric_local_hour_angle(h, topocentric.parallax_in_right_ascension);
 
         let e0 = horizontal::topocentric_elevation_without_refraction(
-            observer.latitude,
+            observer.latitude(),
             topocentric.declination,
             h_prime,
         );
         let delta_e =
-            horizontal::atmospheric_refraction(e0, observer.pressure, observer.temperature);
+            horizontal::atmospheric_refraction(e0, observer.pressure(), observer.temperature());
         let e_corrected = horizontal::topocentric_elevation_corrected(e0, delta_e);
         let zenith = horizontal::topocentric_zenith_angle(e0, delta_e);
 
         let gamma =
-            horizontal::astronomers_azimuth(h_prime, observer.latitude, topocentric.declination);
+            horizontal::astronomers_azimuth(h_prime, observer.latitude(), topocentric.declination);
         let gamma_signed = horizontal::astronomers_azimuth_signed(gamma);
         let azimuth = horizontal::topocentric_azimuth_angle(gamma);
 
         let incidence_angle = incidence::surface_incidence_angle(
             zenith,
             gamma,
-            surface.slope,
-            surface.azimuth_rotation,
+            surface.slope(),
+            surface.azimuth_rotation(),
         );
 
         let m = equation_of_time::sun_mean_longitude(jme);
@@ -695,7 +923,7 @@ impl fmt::Display for SolarPosition {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::{Observer, SolarPosition, Surface};
+    use super::{Observer, ObserverError, SolarPosition, Surface, SurfaceError};
     use crate::SpaDateTime;
     use crate::test_fixtures::{
         REFERENCE_ELEVATION_METRES, REFERENCE_LATITUDE_DEGREES, REFERENCE_LONGITUDE_DEGREES,
@@ -728,20 +956,22 @@ mod tests {
     }
 
     fn reference_observer() -> Observer {
-        Observer {
-            longitude: REFERENCE_LONGITUDE_DEGREES,
-            latitude: REFERENCE_LATITUDE_DEGREES,
-            elevation: REFERENCE_ELEVATION_METRES,
-            pressure: REFERENCE_PRESSURE_MILLIBARS,
-            temperature: REFERENCE_TEMPERATURE_CELSIUS,
-        }
+        Observer::try_new(
+            REFERENCE_LATITUDE_DEGREES,
+            REFERENCE_LONGITUDE_DEGREES,
+            REFERENCE_ELEVATION_METRES,
+            REFERENCE_PRESSURE_MILLIBARS,
+            REFERENCE_TEMPERATURE_CELSIUS,
+        )
+        .expect("reference observer at the A5.1 reference site is valid by construction")
     }
 
     fn reference_surface() -> Surface {
-        Surface {
-            slope: REFERENCE_SURFACE_SLOPE_DEGREES,
-            azimuth_rotation: REFERENCE_SURFACE_AZIMUTH_ROTATION_DEGREES,
-        }
+        Surface::try_new(
+            REFERENCE_SURFACE_SLOPE_DEGREES,
+            REFERENCE_SURFACE_AZIMUTH_ROTATION_DEGREES,
+        )
+        .expect("reference surface at the A5.1 reference orientation is valid by construction")
     }
 
     fn reference_position() -> SolarPosition {
@@ -1037,8 +1267,8 @@ mod tests {
             position.geocentric_declination,
             position.observer_local_hour_angle,
             xi,
-            observer.latitude,
-            observer.elevation,
+            observer.latitude(),
+            observer.elevation(),
         );
         assert_eq!(
             position.parallax_in_right_ascension, topocentric.parallax_in_right_ascension,
@@ -1051,12 +1281,12 @@ mod tests {
         // `(φ, δ', H', P, T)`. A swap with `θ`/`Γ`/`Φ` (all in degrees
         // and same order of magnitude) is exactly the bug this pins.
         let e0 = horizontal::topocentric_elevation_without_refraction(
-            observer.latitude,
+            observer.latitude(),
             position.topocentric_declination,
             position.topocentric_local_hour_angle,
         );
         let delta_e =
-            horizontal::atmospheric_refraction(e0, observer.pressure, observer.temperature);
+            horizontal::atmospheric_refraction(e0, observer.pressure(), observer.temperature());
         let e_corrected = horizontal::topocentric_elevation_corrected(e0, delta_e);
         assert_eq!(
             position.topocentric_elevation_unrefracted, e0,
@@ -1202,59 +1432,38 @@ mod tests {
         );
     }
 
-    /// [`Observer::with_reference_atmosphere`] must forward the three
+    /// [`Observer::try_with_reference_atmosphere`] must forward the three
     /// geographic arguments verbatim and fill the two atmospheric fields
     /// from the SPA paper's reference constants. An arg-order swap (e.g.
     /// switching `latitude` and `longitude`, since both are `f64`) would
     /// surface here at the asymmetric reference site.
     #[test]
     #[allow(clippy::float_cmp)]
-    fn observer_with_reference_atmosphere_uses_paper_constants() {
-        let obs = Observer::with_reference_atmosphere(38.346_02, -0.490_68, 3.0);
-        assert_eq!(obs.latitude, 38.346_02);
-        assert_eq!(obs.longitude, -0.490_68);
-        assert_eq!(obs.elevation, 3.0);
-        assert_eq!(obs.pressure, Observer::REFERENCE_PRESSURE_MILLIBARS);
-        assert_eq!(obs.temperature, Observer::REFERENCE_TEMPERATURE_CELSIUS);
+    fn observer_try_with_reference_atmosphere_uses_paper_constants() {
+        let obs = Observer::try_with_reference_atmosphere(38.346_02, -0.490_68, 3.0).unwrap();
+        assert_eq!(obs.latitude(), 38.346_02);
+        assert_eq!(obs.longitude(), -0.490_68);
+        assert_eq!(obs.elevation(), 3.0);
+        assert_eq!(obs.pressure(), Observer::REFERENCE_PRESSURE_MILLIBARS);
+        assert_eq!(obs.temperature(), Observer::REFERENCE_TEMPERATURE_CELSIUS);
     }
 
-    /// [`Observer::at_sea_level_isa`] must forward the two geographic
+    /// [`Observer::try_at_sea_level_isa`] must forward the two geographic
     /// arguments verbatim, pin `elevation` at `0 m` (the ISA reference
     /// elevation), and fill the two atmospheric fields from the ISA
     /// constants.
     #[test]
     #[allow(clippy::float_cmp)]
-    fn observer_at_sea_level_isa_uses_isa_constants_and_zero_elevation() {
-        let obs = Observer::at_sea_level_isa(40.0, -3.0);
-        assert_eq!(obs.latitude, 40.0);
-        assert_eq!(obs.longitude, -3.0);
-        assert_eq!(obs.elevation, 0.0);
-        assert_eq!(obs.pressure, Observer::ISA_PRESSURE_MILLIBARS);
-        assert_eq!(obs.temperature, Observer::ISA_TEMPERATURE_CELSIUS);
+    fn observer_try_at_sea_level_isa_uses_isa_constants_and_zero_elevation() {
+        let obs = Observer::try_at_sea_level_isa(40.0, -3.0).unwrap();
+        assert_eq!(obs.latitude(), 40.0);
+        assert_eq!(obs.longitude(), -3.0);
+        assert_eq!(obs.elevation(), 0.0);
+        assert_eq!(obs.pressure(), Observer::ISA_PRESSURE_MILLIBARS);
+        assert_eq!(obs.temperature(), Observer::ISA_TEMPERATURE_CELSIUS);
     }
 
-    /// [`Observer::default`] must agree with [`Observer::at_sea_level_isa`]
-    /// at `(0.0, 0.0)`. The struct-update use case the `Default` impl
-    /// enables relies on the atmospheric and elevation fields surviving
-    /// unchanged when callers override only the two geographic fields;
-    /// this pins that contract field-by-field.
-    #[test]
-    #[allow(clippy::float_cmp)]
-    fn observer_default_matches_at_sea_level_isa_at_origin() {
-        assert_eq!(Observer::default(), Observer::at_sea_level_isa(0.0, 0.0));
-        let obs = Observer {
-            latitude: 40.0,
-            longitude: -3.0,
-            ..Default::default()
-        };
-        assert_eq!(obs.latitude, 40.0);
-        assert_eq!(obs.longitude, -3.0);
-        assert_eq!(obs.elevation, 0.0);
-        assert_eq!(obs.pressure, Observer::ISA_PRESSURE_MILLIBARS);
-        assert_eq!(obs.temperature, Observer::ISA_TEMPERATURE_CELSIUS);
-    }
-
-    /// An observer built from [`Observer::with_reference_atmosphere`]
+    /// An observer built from [`Observer::try_with_reference_atmosphere`]
     /// collapses equation 42's pressure and temperature ratios to one, so
     /// [`atmospheric_refraction`] returns the pure Saemundsson form
     /// `1.02 / (60 · tan(e₀ + 10.3/(e₀ + 5.11)))`. Pinning this functional
@@ -1265,16 +1474,346 @@ mod tests {
     /// [`atmospheric_refraction`]: crate::horizontal::atmospheric_refraction
     #[test]
     fn reference_atmosphere_collapses_equation_42_ratios_to_one() {
-        let obs = Observer::with_reference_atmosphere(0.0, 0.0, 0.0);
+        let obs = Observer::try_with_reference_atmosphere(0.0, 0.0, 0.0).unwrap();
         for &e0 in &[0.0_f64, 10.0, 45.0, 89.0] {
             let delta_e =
-                crate::horizontal::atmospheric_refraction(e0, obs.pressure, obs.temperature);
+                crate::horizontal::atmospheric_refraction(e0, obs.pressure(), obs.temperature());
             let aux = e0 + 10.3 / (e0 + 5.11);
             let expected = 1.02 / (60.0 * aux.to_radians().tan());
             assert!(
                 (delta_e - expected).abs() < 1e-15,
                 "Δe at the reference atmosphere must equal the pure Saemundsson form \
                  for e₀ = {e0}: got {delta_e} vs expected {expected}",
+            );
+        }
+    }
+
+    /// [`Observer::TEMPERATURE_FLOOR_CELSIUS_EXCLUSIVE`] must mirror the
+    /// `273` denominator constant from equation 42 (not the strict IAU
+    /// `273.15`). A future refactor that swapped the offset would surface
+    /// here as both an exact-equality failure and a documented divergence
+    /// of `0.15 °C` between the validation floor and the formula
+    /// singularity.
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn observer_temperature_floor_matches_equation_42_kelvin_offset() {
+        assert_eq!(
+            Observer::TEMPERATURE_FLOOR_CELSIUS_EXCLUSIVE,
+            -crate::horizontal::KELVIN_OFFSET_FROM_CELSIUS,
+            "Temperature floor must equal -eq.42 Kelvin offset",
+        );
+        assert_eq!(
+            Observer::TEMPERATURE_FLOOR_CELSIUS_EXCLUSIVE,
+            -273.0,
+            "Temperature floor must be -273 °C exactly (paper's rounded constant)",
+        );
+    }
+
+    /// [`Observer::try_new`] must accept the canonical reference inputs
+    /// (the asymmetric Table A5.1 site at 39.74° N, -105.18° E, 1830 m
+    /// elevation, 820 mbar, 11 °C) and round-trip every field bit-for-bit
+    /// through the accessors. A regression in argument ordering would
+    /// surface here as a latitude/longitude swap.
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn observer_try_new_accepts_valid_inputs_and_round_trips_through_accessors() {
+        let obs = Observer::try_new(39.742_476, -105.1786, 1830.14, 820.0, 11.0)
+            .expect("A5.1 reference observer must validate");
+        assert_eq!(obs.latitude(), 39.742_476);
+        assert_eq!(obs.longitude(), -105.1786);
+        assert_eq!(obs.elevation(), 1830.14);
+        assert_eq!(obs.pressure(), 820.0);
+        assert_eq!(obs.temperature(), 11.0);
+    }
+
+    /// Inclusive boundaries: latitude `±90°` (the poles) and longitude
+    /// `±180°` (the antimeridian, in both forms) must validate. A guard
+    /// that uses strict `<` / `>` instead of `<=` / `>=` would reject
+    /// these limits and surface here.
+    #[test]
+    fn observer_try_new_accepts_latitude_and_longitude_at_their_inclusive_bounds() {
+        for &lat in &[-90.0_f64, 90.0] {
+            for &lon in &[-180.0_f64, 180.0] {
+                assert!(
+                    Observer::try_new(lat, lon, 0.0, 1013.25, 15.0).is_ok(),
+                    "Observer at (lat={lat}, lon={lon}) must validate",
+                );
+            }
+        }
+    }
+
+    /// [`Observer::try_new`] must reject every flavour of bad latitude:
+    /// `NaN`, `±Inf`, and any value outside `[-90°, 90°]`. The matrix
+    /// covers both arms of the `||` short-circuit inside the validation
+    /// (`!is_finite()` and `!contains()`) so a future split of the two
+    /// checks cannot accidentally let one half through.
+    #[test]
+    fn observer_try_new_rejects_invalid_latitude() {
+        for bad in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            90.000_001,
+            -90.000_001,
+            180.0,
+        ] {
+            assert!(
+                matches!(
+                    Observer::try_new(bad, 0.0, 0.0, 1013.25, 15.0),
+                    Err(ObserverError::InvalidLatitude(_)),
+                ),
+                "latitude {bad} must be rejected",
+            );
+        }
+    }
+
+    /// Symmetric to the latitude test: every flavour of bad longitude
+    /// (`NaN`, `±Inf`, outside `[-180°, 180°]`) must be rejected. A
+    /// regression where the longitude check fell through (e.g. validating
+    /// against the latitude range by accident) would surface here.
+    #[test]
+    fn observer_try_new_rejects_invalid_longitude() {
+        for bad in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            180.000_001,
+            -180.000_001,
+            360.0,
+        ] {
+            assert!(
+                matches!(
+                    Observer::try_new(0.0, bad, 0.0, 1013.25, 15.0),
+                    Err(ObserverError::InvalidLongitude(_)),
+                ),
+                "longitude {bad} must be rejected",
+            );
+        }
+    }
+
+    /// Non-finite elevation must be rejected. The validator does not
+    /// impose a range on elevation (any physically meaningful altitude
+    /// keeps the parallax correction well behaved), so the only rejection
+    /// is the `!is_finite()` branch.
+    #[test]
+    fn observer_try_new_rejects_non_finite_elevation() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(
+                matches!(
+                    Observer::try_new(0.0, 0.0, bad, 1013.25, 15.0),
+                    Err(ObserverError::InvalidElevation(_)),
+                ),
+                "elevation {bad} must be rejected",
+            );
+        }
+    }
+
+    /// Pressure must be strictly positive and finite. Equation 42's
+    /// `(P / 1010)` ratio is undefined for non-positive inputs, so `0.0`
+    /// and any negative pressure must be rejected alongside `NaN` and
+    /// `±Inf`.
+    #[test]
+    fn observer_try_new_rejects_invalid_pressure() {
+        for bad in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            0.0,
+            -1.0,
+            -1013.25,
+        ] {
+            assert!(
+                matches!(
+                    Observer::try_new(0.0, 0.0, 0.0, bad, 15.0),
+                    Err(ObserverError::InvalidPressure(_)),
+                ),
+                "pressure {bad} must be rejected",
+            );
+        }
+    }
+
+    /// Temperature must be strictly above the equation 42 singularity at
+    /// `T = -273 °C` and finite. The probe at the exact floor pins the
+    /// strict inequality.
+    #[test]
+    fn observer_try_new_rejects_invalid_temperature() {
+        for bad in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            -273.0,
+            -273.000_001,
+            -1e6,
+        ] {
+            assert!(
+                matches!(
+                    Observer::try_new(0.0, 0.0, 0.0, 1013.25, bad),
+                    Err(ObserverError::InvalidTemperature(_)),
+                ),
+                "temperature {bad} must be rejected",
+            );
+        }
+    }
+
+    /// [`Observer::try_with_reference_atmosphere`] must surface the same
+    /// per-field [`ObserverError`] variants as [`Observer::try_new`] for
+    /// the three geographic arguments. The atmospheric fields are pinned
+    /// to known-valid constants so they cannot fail; only the geographic
+    /// inputs are propagated.
+    #[test]
+    fn observer_try_with_reference_atmosphere_rejects_invalid_geographics() {
+        assert!(matches!(
+            Observer::try_with_reference_atmosphere(f64::NAN, 0.0, 0.0),
+            Err(ObserverError::InvalidLatitude(_)),
+        ));
+        assert!(matches!(
+            Observer::try_with_reference_atmosphere(0.0, f64::NAN, 0.0),
+            Err(ObserverError::InvalidLongitude(_)),
+        ));
+        assert!(matches!(
+            Observer::try_with_reference_atmosphere(0.0, 0.0, f64::NAN),
+            Err(ObserverError::InvalidElevation(_)),
+        ));
+    }
+
+    /// Symmetric to the reference-atmosphere check: invalid lat/lon
+    /// inputs to [`Observer::try_at_sea_level_isa`] must surface as the
+    /// matching [`ObserverError`] variants while the pinned ISA
+    /// elevation/pressure/temperature never fail.
+    #[test]
+    fn observer_try_at_sea_level_isa_rejects_invalid_geographics() {
+        assert!(matches!(
+            Observer::try_at_sea_level_isa(f64::NAN, 0.0),
+            Err(ObserverError::InvalidLatitude(_)),
+        ));
+        assert!(matches!(
+            Observer::try_at_sea_level_isa(0.0, f64::NAN),
+            Err(ObserverError::InvalidLongitude(_)),
+        ));
+    }
+
+    /// [`ObserverError`]'s [`Display`] impl (via `thiserror`) must
+    /// mention the offending raw value and the matching field name. The
+    /// assertion is loose on phrasing but pins both pieces of metadata so
+    /// a future copy-edit that drops either surfaces here.
+    ///
+    /// [`Display`]: core::fmt::Display
+    #[test]
+    fn observer_error_display_mentions_field_and_value() {
+        for (err, field) in [
+            (ObserverError::InvalidLatitude(91.0), "latitude"),
+            (ObserverError::InvalidLongitude(181.0), "longitude"),
+            (ObserverError::InvalidElevation(f64::NAN), "elevation"),
+            (ObserverError::InvalidPressure(-1.0), "pressure"),
+            (ObserverError::InvalidTemperature(-300.0), "temperature"),
+        ] {
+            let rendered = format!("{err}");
+            assert!(
+                rendered.contains(field),
+                "{err:?} Display must mention `{field}`, got: {rendered}",
+            );
+        }
+    }
+
+    /// [`Surface::try_new`] must accept the canonical Table A5.1 surface
+    /// orientation (`slope = 30°`, `azimuth_rotation = -10°`) and
+    /// round-trip both fields through the accessors. The asymmetric
+    /// rotation catches an accidental swap with the slope.
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn surface_try_new_accepts_valid_inputs_and_round_trips_through_accessors() {
+        let surface = Surface::try_new(30.0, -10.0).expect("A5.1 reference surface must validate");
+        assert_eq!(surface.slope(), 30.0);
+        assert_eq!(surface.azimuth_rotation(), -10.0);
+    }
+
+    /// Inclusive boundaries: `slope ∈ {0°, 180°}` (horizontal, upside
+    /// down) and `azimuth_rotation ∈ {-180°, 180°}` must validate. The
+    /// matrix mirrors the equivalent [`Observer`] boundary test.
+    #[test]
+    fn surface_try_new_accepts_slope_and_azimuth_at_their_inclusive_bounds() {
+        for &slope in &[0.0_f64, 180.0] {
+            for &azimuth in &[-180.0_f64, 180.0] {
+                assert!(
+                    Surface::try_new(slope, azimuth).is_ok(),
+                    "Surface at (slope={slope}, azimuth={azimuth}) must validate",
+                );
+            }
+        }
+    }
+
+    /// Every flavour of bad slope (`NaN`, `±Inf`, outside `[0°, 180°]`)
+    /// must be rejected. Negative slope has no geometric meaning (it
+    /// would re-encode an azimuth flip).
+    #[test]
+    fn surface_try_new_rejects_invalid_slope() {
+        for bad in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            -0.000_001,
+            180.000_001,
+            360.0,
+        ] {
+            assert!(
+                matches!(
+                    Surface::try_new(bad, 0.0),
+                    Err(SurfaceError::InvalidSlope(_)),
+                ),
+                "slope {bad} must be rejected",
+            );
+        }
+    }
+
+    /// Symmetric to the slope test: every flavour of bad azimuth rotation
+    /// (`NaN`, `±Inf`, outside `[-180°, 180°]`) must be rejected.
+    #[test]
+    fn surface_try_new_rejects_invalid_azimuth_rotation() {
+        for bad in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            180.000_001,
+            -180.000_001,
+            360.0,
+        ] {
+            assert!(
+                matches!(
+                    Surface::try_new(0.0, bad),
+                    Err(SurfaceError::InvalidAzimuthRotation(_)),
+                ),
+                "azimuth rotation {bad} must be rejected",
+            );
+        }
+    }
+
+    /// [`Surface::horizontal`] and [`Surface::default`] must both produce
+    /// the same `slope = 0°, azimuth_rotation = 0°` surface, the
+    /// canonical horizontal collector consumed by
+    /// [`SolarPosition::compute`] when no tilted panel is of interest.
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn surface_horizontal_and_default_are_equivalent_and_zero() {
+        let h = Surface::horizontal();
+        assert_eq!(h.slope(), 0.0);
+        assert_eq!(h.azimuth_rotation(), 0.0);
+        assert_eq!(Surface::default(), h);
+    }
+
+    /// [`SurfaceError`]'s [`Display`] impl (via `thiserror`) must mention
+    /// the offending raw value and the matching field name.
+    ///
+    /// [`Display`]: core::fmt::Display
+    #[test]
+    fn surface_error_display_mentions_field_and_value() {
+        for (err, field) in [
+            (SurfaceError::InvalidSlope(-1.0), "slope"),
+            (SurfaceError::InvalidAzimuthRotation(200.0), "azimuth"),
+        ] {
+            let rendered = format!("{err}");
+            assert!(
+                rendered.contains(field),
+                "{err:?} Display must mention `{field}`, got: {rendered}",
             );
         }
     }
