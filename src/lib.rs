@@ -10,7 +10,6 @@ pub mod apparent;
 pub mod delta_t;
 pub mod equation_of_time;
 pub mod equatorial;
-pub mod error;
 pub mod geocentric;
 pub mod heliocentric;
 pub mod helper;
@@ -31,5 +30,5 @@ pub mod time;
 mod test_fixtures;
 
 pub use solar_time::SolarDay;
-pub use spa::{Observer, SolarPosition, Surface};
+pub use spa::{Observer, ObserverError, SolarPosition, Surface, SurfaceError};
 pub use time::{SpaDateTime, SpaTimeError};
