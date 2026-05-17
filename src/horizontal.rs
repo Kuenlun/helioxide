@@ -19,19 +19,31 @@
 
 use crate::helper::limit_degrees;
 
-/// Standard atmospheric pressure used as the denominator of the pressure
-/// ratio in equation 42 (millibars). Reproduced verbatim from the paper.
-const STANDARD_PRESSURE_MILLIBARS: f64 = 1010.0;
+/// Equation 42 denominator of the pressure ratio (millibars).
+///
+/// Reproduced verbatim from the paper. Re-exported on [`Observer`] as
+/// [`Observer::REFERENCE_PRESSURE_MILLIBARS`] so callers see the same
+/// value through both the formula module and the public observer API.
+///
+/// [`Observer`]: crate::spa::Observer
+/// [`Observer::REFERENCE_PRESSURE_MILLIBARS`]: crate::spa::Observer::REFERENCE_PRESSURE_MILLIBARS
+pub const STANDARD_PRESSURE_MILLIBARS: f64 = 1010.0;
 
-/// Reference temperature `283 K` (i.e. `10 °C`) appearing as the numerator
-/// of the temperature ratio in equation 42.
-const REFERENCE_TEMPERATURE_KELVIN: f64 = 283.0;
+/// Equation 42 numerator of the temperature ratio (Kelvin).
+///
+/// `283 K` (i.e. `10 °C`). Re-exposed on [`Observer`] in Celsius form as
+/// [`Observer::REFERENCE_TEMPERATURE_CELSIUS`].
+///
+/// [`Observer`]: crate::spa::Observer
+/// [`Observer::REFERENCE_TEMPERATURE_CELSIUS`]: crate::spa::Observer::REFERENCE_TEMPERATURE_CELSIUS
+pub const REFERENCE_TEMPERATURE_KELVIN: f64 = 283.0;
 
-/// Offset that converts Celsius to Kelvin inside equation 42's denominator
-/// `273 + T`. Reproduced verbatim from the paper (the `0.15` of the strict
-/// IAU conversion is dropped: at the magnitudes the formula targets, its
+/// Celsius-to-Kelvin offset inside equation 42's denominator `273 + T`.
+///
+/// Reproduced verbatim from the paper (the `0.15` of the strict IAU
+/// conversion is dropped: at the magnitudes the formula targets, its
 /// influence on `Δe` is below the trailing digit of the published example).
-const KELVIN_OFFSET_FROM_CELSIUS: f64 = 273.0;
+pub const KELVIN_OFFSET_FROM_CELSIUS: f64 = 273.0;
 
 /// Saemundsson refraction-formula numerator `1.02` (arc minutes), the
 /// dimensional constant of equation 42.

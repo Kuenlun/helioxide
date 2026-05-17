@@ -33,6 +33,42 @@ use crate::{
 /// (metres), consumed by section 3.12.3. `pressure` (millibars) and
 /// `temperature` (degrees Celsius) feed the atmospheric refraction model
 /// of equation 42 and should be annual averages for the site.
+///
+/// Two reference atmospheres are exposed as `pub const` values for callers
+/// without local annual averages on hand:
+///
+/// * The ICAO/ISA sea-level standard atmosphere
+///   ([`ISA_PRESSURE_MILLIBARS`], [`ISA_TEMPERATURE_CELSIUS`]):
+///   `1013.25 mbar`, `15 °C`. The industry-wide aeronautical default and
+///   the recommended choice when no local meteorological data is
+///   available. The convenience constructor [`Observer::at_sea_level_isa`]
+///   fills both fields from these constants and pins `elevation` at `0 m`;
+///   [`Observer::default`] does the same with `latitude` and `longitude`
+///   left at zero so callers can use struct-update syntax.
+/// * The SPA paper's calibration atmosphere
+///   ([`REFERENCE_PRESSURE_MILLIBARS`], [`REFERENCE_TEMPERATURE_CELSIUS`]):
+///   `1010 mbar`, `10 °C` (`283 K`). At these values, both ratios in
+///   equation 42 collapse to one, leaving
+///   `Δe = 1.02 / (60 · tan(e₀ + 10.3/(e₀ + 5.11)))`. Pick this only when
+///   reproducing the appendix A.5 worked example (the published Table
+///   A5.1 values were computed at this atmosphere). The convenience
+///   constructor [`Observer::with_reference_atmosphere`] fills both fields
+///   from these constants. The ISA atmosphere above scales equation 42's
+///   `Δe` by a constant factor of `~0.986` relative to this one (the
+///   formula is linear in both ratios).
+///
+/// [`SolarPosition::compute`] is the sole consumer of `pressure` and
+/// `temperature`. [`SolarDay::compute`] ignores them because appendix A.2
+/// absorbs the average horizon-level refraction into the constant
+/// `-0.8333°`. A nonsense value (zero, NaN) in either of these two fields
+/// therefore corrupts the topocentric elevation [`SolarPosition::compute`]
+/// returns without affecting the sunrise / sunset / transit times.
+///
+/// [`REFERENCE_PRESSURE_MILLIBARS`]: Observer::REFERENCE_PRESSURE_MILLIBARS
+/// [`REFERENCE_TEMPERATURE_CELSIUS`]: Observer::REFERENCE_TEMPERATURE_CELSIUS
+/// [`ISA_PRESSURE_MILLIBARS`]: Observer::ISA_PRESSURE_MILLIBARS
+/// [`ISA_TEMPERATURE_CELSIUS`]: Observer::ISA_TEMPERATURE_CELSIUS
+/// [`SolarDay::compute`]: crate::SolarDay::compute
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Observer {
     /// Geographic longitude `σ` (degrees, signed, positive east of
@@ -47,6 +83,129 @@ pub struct Observer {
     pub pressure: f64,
     /// Annual average atmospheric temperature `T` (degrees Celsius).
     pub temperature: f64,
+}
+
+impl Observer {
+    /// SPA paper reference pressure (millibars).
+    ///
+    /// Reproduced verbatim from equation 42 of NREL/TP-560-34302: setting
+    /// [`Self::pressure`] to this value collapses the `(P / 1010)` ratio
+    /// in the refraction formula to one. Identical to the literal used
+    /// internally by [`atmospheric_refraction`].
+    ///
+    /// [`atmospheric_refraction`]: crate::horizontal::atmospheric_refraction
+    pub const REFERENCE_PRESSURE_MILLIBARS: f64 = horizontal::STANDARD_PRESSURE_MILLIBARS;
+
+    /// SPA paper reference temperature (degrees Celsius).
+    ///
+    /// Equivalent to `283 K`, the numerator of the temperature ratio in
+    /// equation 42: setting [`Self::temperature`] to this value collapses
+    /// the `(283 / (273 + T))` ratio to one.
+    pub const REFERENCE_TEMPERATURE_CELSIUS: f64 =
+        horizontal::REFERENCE_TEMPERATURE_KELVIN - horizontal::KELVIN_OFFSET_FROM_CELSIUS;
+
+    /// ICAO/ISA sea-level standard pressure (millibars).
+    ///
+    /// Reproduced from ISO 2533:1975 / ICAO Doc 7488: `1013.25 mbar` is
+    /// the sea-level pressure of the International Standard Atmosphere.
+    /// Differs from [`Self::REFERENCE_PRESSURE_MILLIBARS`] by `+3.25 mbar`;
+    /// equation 42 scales `Δe` by the same proportion (linear in `P`).
+    pub const ISA_PRESSURE_MILLIBARS: f64 = 1013.25;
+
+    /// ICAO/ISA sea-level standard temperature (degrees Celsius).
+    ///
+    /// Reproduced from ISO 2533:1975 / ICAO Doc 7488: `15 °C` (`288.15 K`)
+    /// is the sea-level temperature of the International Standard
+    /// Atmosphere. Differs from [`Self::REFERENCE_TEMPERATURE_CELSIUS`] by
+    /// `+5 °C`; equation 42's temperature ratio `283 / (273 + T)` drops
+    /// from `1.000` to `283 / 288 ≈ 0.9826`, scaling `Δe` by the same
+    /// factor.
+    pub const ISA_TEMPERATURE_CELSIUS: f64 = 15.0;
+
+    /// Construct an observer using the SPA paper's reference atmosphere
+    /// (`1010 mbar`, `10 °C`).
+    ///
+    /// Pick this only when reproducing the appendix worked examples. The
+    /// refraction correction of equation 42 reduces to
+    /// `Δe = 1.02 / (60 · tan(e₀ + 10.3/(e₀ + 5.11)))` at this atmosphere,
+    /// matching the values published in Table A5.1. For ordinary use with
+    /// no local meteorological data prefer [`Self::at_sea_level_isa`]
+    /// instead. `elevation` is the observer height above sea level
+    /// (metres), consumed by section 3.12.3's parallax correction.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use helioxide::Observer;
+    ///
+    /// let obs = Observer::with_reference_atmosphere(38.346_02, -0.490_68, 3.0);
+    /// assert_eq!(obs.pressure, Observer::REFERENCE_PRESSURE_MILLIBARS);
+    /// assert_eq!(obs.temperature, Observer::REFERENCE_TEMPERATURE_CELSIUS);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn with_reference_atmosphere(latitude: f64, longitude: f64, elevation: f64) -> Self {
+        Self {
+            longitude,
+            latitude,
+            elevation,
+            pressure: Self::REFERENCE_PRESSURE_MILLIBARS,
+            temperature: Self::REFERENCE_TEMPERATURE_CELSIUS,
+        }
+    }
+
+    /// Construct a sea-level observer using the ICAO/ISA standard
+    /// atmosphere (`1013.25 mbar`, `15 °C`, elevation `0 m`).
+    ///
+    /// The recommended default when the observer site is approximately at
+    /// sea level and no local meteorological data is available. Diverges
+    /// from the SPA paper's reference by `+3.25 mbar` and `+5 °C`, scaling
+    /// equation 42's `Δe` by a constant factor of `~0.986` (the formula is
+    /// linear in both ratios).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use helioxide::Observer;
+    ///
+    /// let obs = Observer::at_sea_level_isa(40.0, -3.0);
+    /// assert_eq!(obs.elevation, 0.0);
+    /// assert_eq!(obs.pressure, Observer::ISA_PRESSURE_MILLIBARS);
+    /// assert_eq!(obs.temperature, Observer::ISA_TEMPERATURE_CELSIUS);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn at_sea_level_isa(latitude: f64, longitude: f64) -> Self {
+        Self {
+            longitude,
+            latitude,
+            elevation: 0.0,
+            pressure: Self::ISA_PRESSURE_MILLIBARS,
+            temperature: Self::ISA_TEMPERATURE_CELSIUS,
+        }
+    }
+}
+
+impl Default for Observer {
+    /// [`Self::at_sea_level_isa`] with `latitude = longitude = 0`.
+    ///
+    /// The four atmospheric and elevation fields come from the ICAO/ISA
+    /// sea-level standard; the two geographic fields default to zero so
+    /// callers can mix struct-update syntax with the constructor without
+    /// silently inheriting nonsense atmosphere values:
+    ///
+    /// ```
+    /// use helioxide::Observer;
+    ///
+    /// let obs = Observer { latitude: 40.0, longitude: -3.0, ..Default::default() };
+    /// assert_eq!(obs.pressure, Observer::ISA_PRESSURE_MILLIBARS);
+    /// assert_eq!(obs.temperature, Observer::ISA_TEMPERATURE_CELSIUS);
+    /// assert_eq!(obs.elevation, 0.0);
+    /// ```
+    #[inline]
+    fn default() -> Self {
+        Self::at_sea_level_isa(0.0, 0.0)
+    }
 }
 
 /// Tilted surface (e.g. a fixed-tilt photovoltaic panel) consumed by the
@@ -999,5 +1158,124 @@ mod tests {
             result.is_ok(),
             "Display must succeed when the writer accepts every byte",
         );
+    }
+
+    /// The four [`Observer`] atmospheric constants must equal the literal
+    /// values they document. The SPA paper's reference is pinned against
+    /// the equation 42 constants in [`crate::horizontal`] so a future
+    /// refactor that decouples them (or changes one without the other)
+    /// surfaces here; the ICAO/ISA pair is pinned against the ISO 2533:1975
+    /// sea-level standard atmosphere values.
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn observer_atmospheric_constants_equal_their_published_references() {
+        assert_eq!(
+            Observer::REFERENCE_PRESSURE_MILLIBARS,
+            crate::horizontal::STANDARD_PRESSURE_MILLIBARS,
+            "Observer reference pressure must equal the eq. 42 calibration constant",
+        );
+        assert_eq!(
+            Observer::REFERENCE_PRESSURE_MILLIBARS,
+            1010.0,
+            "SPA paper reference pressure is 1010 mbar",
+        );
+        assert_eq!(
+            Observer::REFERENCE_TEMPERATURE_CELSIUS,
+            crate::horizontal::REFERENCE_TEMPERATURE_KELVIN
+                - crate::horizontal::KELVIN_OFFSET_FROM_CELSIUS,
+            "Observer reference temperature must equal `283 K - 273 K` from eq. 42",
+        );
+        assert_eq!(
+            Observer::REFERENCE_TEMPERATURE_CELSIUS,
+            10.0,
+            "SPA paper reference temperature is 10 °C (283 K)",
+        );
+        assert_eq!(
+            Observer::ISA_PRESSURE_MILLIBARS,
+            1013.25,
+            "ICAO/ISA sea-level pressure is 1013.25 mbar per ISO 2533:1975",
+        );
+        assert_eq!(
+            Observer::ISA_TEMPERATURE_CELSIUS,
+            15.0,
+            "ICAO/ISA sea-level temperature is 15 °C per ISO 2533:1975",
+        );
+    }
+
+    /// [`Observer::with_reference_atmosphere`] must forward the three
+    /// geographic arguments verbatim and fill the two atmospheric fields
+    /// from the SPA paper's reference constants. An arg-order swap (e.g.
+    /// switching `latitude` and `longitude`, since both are `f64`) would
+    /// surface here at the asymmetric reference site.
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn observer_with_reference_atmosphere_uses_paper_constants() {
+        let obs = Observer::with_reference_atmosphere(38.346_02, -0.490_68, 3.0);
+        assert_eq!(obs.latitude, 38.346_02);
+        assert_eq!(obs.longitude, -0.490_68);
+        assert_eq!(obs.elevation, 3.0);
+        assert_eq!(obs.pressure, Observer::REFERENCE_PRESSURE_MILLIBARS);
+        assert_eq!(obs.temperature, Observer::REFERENCE_TEMPERATURE_CELSIUS);
+    }
+
+    /// [`Observer::at_sea_level_isa`] must forward the two geographic
+    /// arguments verbatim, pin `elevation` at `0 m` (the ISA reference
+    /// elevation), and fill the two atmospheric fields from the ISA
+    /// constants.
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn observer_at_sea_level_isa_uses_isa_constants_and_zero_elevation() {
+        let obs = Observer::at_sea_level_isa(40.0, -3.0);
+        assert_eq!(obs.latitude, 40.0);
+        assert_eq!(obs.longitude, -3.0);
+        assert_eq!(obs.elevation, 0.0);
+        assert_eq!(obs.pressure, Observer::ISA_PRESSURE_MILLIBARS);
+        assert_eq!(obs.temperature, Observer::ISA_TEMPERATURE_CELSIUS);
+    }
+
+    /// [`Observer::default`] must agree with [`Observer::at_sea_level_isa`]
+    /// at `(0.0, 0.0)`. The struct-update use case the `Default` impl
+    /// enables relies on the atmospheric and elevation fields surviving
+    /// unchanged when callers override only the two geographic fields;
+    /// this pins that contract field-by-field.
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn observer_default_matches_at_sea_level_isa_at_origin() {
+        assert_eq!(Observer::default(), Observer::at_sea_level_isa(0.0, 0.0));
+        let obs = Observer {
+            latitude: 40.0,
+            longitude: -3.0,
+            ..Default::default()
+        };
+        assert_eq!(obs.latitude, 40.0);
+        assert_eq!(obs.longitude, -3.0);
+        assert_eq!(obs.elevation, 0.0);
+        assert_eq!(obs.pressure, Observer::ISA_PRESSURE_MILLIBARS);
+        assert_eq!(obs.temperature, Observer::ISA_TEMPERATURE_CELSIUS);
+    }
+
+    /// An observer built from [`Observer::with_reference_atmosphere`]
+    /// collapses equation 42's pressure and temperature ratios to one, so
+    /// [`atmospheric_refraction`] returns the pure Saemundsson form
+    /// `1.02 / (60 · tan(e₀ + 10.3/(e₀ + 5.11)))`. Pinning this functional
+    /// invariant catches any future drift between the two sources of truth
+    /// (the `Observer` constants and the `horizontal` formula constants)
+    /// that the literal-equality test above cannot detect on its own.
+    ///
+    /// [`atmospheric_refraction`]: crate::horizontal::atmospheric_refraction
+    #[test]
+    fn reference_atmosphere_collapses_equation_42_ratios_to_one() {
+        let obs = Observer::with_reference_atmosphere(0.0, 0.0, 0.0);
+        for &e0 in &[0.0_f64, 10.0, 45.0, 89.0] {
+            let delta_e =
+                crate::horizontal::atmospheric_refraction(e0, obs.pressure, obs.temperature);
+            let aux = e0 + 10.3 / (e0 + 5.11);
+            let expected = 1.02 / (60.0 * aux.to_radians().tan());
+            assert!(
+                (delta_e - expected).abs() < 1e-15,
+                "Δe at the reference atmosphere must equal the pure Saemundsson form \
+                 for e₀ = {e0}: got {delta_e} vs expected {expected}",
+            );
+        }
     }
 }
