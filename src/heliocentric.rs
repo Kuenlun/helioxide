@@ -3,95 +3,30 @@
 // Copyright (c) 2026 Juan Luis Leal Contreras (Kuenlun)
 
 //! Earth heliocentric longitude (`L`), latitude (`B`) and radius vector (`R`).
-//!
-//! Implements section 3.2 of NREL/TP-560-34302. Each quantity is the value of
-//! a truncated polynomial in the Julian Ephemeris Millennium (JME) whose
-//! coefficients are themselves Σ A·cos(B + C·JME) over the rows published in
-//! Table A4.2 of the same report.
+//! Section 3.2, equations 9 to 11, Table A4.2.
 
 use crate::helper::limit_degrees;
 use tables::{B_TERMS, L_TERMS, R_TERMS};
 
 /// Earth heliocentric longitude `L` (degrees), wrapped into `[0°, 360°)`.
-///
-/// Refer to section 3.2, steps 3.2.1 through 3.2.6.
-///
-/// # Examples
-///
-/// ```
-/// use helioxide::heliocentric::earth_heliocentric_longitude;
-/// use helioxide::julian::{
-///     calculate_julian_ephemeris_century, calculate_julian_ephemeris_day,
-///     calculate_julian_ephemeris_millennium,
-/// };
-///
-/// // Table A5.1 reference: 17 October 2003, 12:30:30 LST, ΔT = 67 s.
-/// let jde = calculate_julian_ephemeris_day(2_452_930.312_847, 67.0);
-/// let jce = calculate_julian_ephemeris_century(jde);
-/// let jme = calculate_julian_ephemeris_millennium(jce);
-///
-/// let l = earth_heliocentric_longitude(jme);
-/// assert!((l - 24.018_261_691_7).abs() < 1e-6);
-/// ```
 #[must_use]
 pub fn earth_heliocentric_longitude(jme: f64) -> f64 {
     limit_degrees(evaluate_periodic_series(&L_TERMS, jme).to_degrees())
 }
 
 /// Earth heliocentric latitude `B` (degrees, signed, not range-limited).
-///
-/// Refer to section 3.2, step 3.2.7.
-///
-/// # Examples
-///
-/// ```
-/// use helioxide::heliocentric::earth_heliocentric_latitude;
-/// use helioxide::julian::{
-///     calculate_julian_ephemeris_century, calculate_julian_ephemeris_day,
-///     calculate_julian_ephemeris_millennium,
-/// };
-///
-/// let jde = calculate_julian_ephemeris_day(2_452_930.312_847, 67.0);
-/// let jce = calculate_julian_ephemeris_century(jde);
-/// let jme = calculate_julian_ephemeris_millennium(jce);
-///
-/// let b = earth_heliocentric_latitude(jme);
-/// assert!((b - -0.000_101_121_9).abs() < 1e-9);
-/// ```
 #[must_use]
 pub fn earth_heliocentric_latitude(jme: f64) -> f64 {
     evaluate_periodic_series(&B_TERMS, jme).to_degrees()
 }
 
 /// Earth radius vector `R` (astronomical units).
-///
-/// Refer to section 3.2, step 3.2.8.
-///
-/// # Examples
-///
-/// ```
-/// use helioxide::heliocentric::earth_radius_vector;
-/// use helioxide::julian::{
-///     calculate_julian_ephemeris_century, calculate_julian_ephemeris_day,
-///     calculate_julian_ephemeris_millennium,
-/// };
-///
-/// let jde = calculate_julian_ephemeris_day(2_452_930.312_847, 67.0);
-/// let jce = calculate_julian_ephemeris_century(jde);
-/// let jme = calculate_julian_ephemeris_millennium(jce);
-///
-/// let r = earth_radius_vector(jme);
-/// assert!((r - 0.996_542_297_4).abs() < 1e-9);
-/// ```
 #[must_use]
 pub fn earth_radius_vector(jme: f64) -> f64 {
     evaluate_periodic_series(&R_TERMS, jme)
 }
 
-/// Σ Aᵢ·cos(Bᵢ + Cᵢ·JME) over the rows of one A4.2 sub-block (equation 9).
-///
-/// Returns radians for `L_TERMS`/`B_TERMS` and astronomical units for
-/// `R_TERMS`, before the `1 / 10⁸` scaling applied in [`evaluate_periodic_series`].
+/// `Σ Aᵢ · cos(Bᵢ + Cᵢ · JME)` over the rows of one A4.2 sub-block.
 #[inline]
 #[must_use]
 fn periodic_subseries_sum(rows: &[[f64; 3]], jme: f64) -> f64 {
@@ -100,8 +35,7 @@ fn periodic_subseries_sum(rows: &[[f64; 3]], jme: f64) -> f64 {
         .sum()
 }
 
-/// Evaluates `(S₀ + S₁·JME + … + Sₙ·JMEⁿ) / 10⁸` (equations 10 and 11)
-/// using Horner's method, with each `Sₖ` produced by [`periodic_subseries_sum`].
+/// `(S₀ + S₁·JME + … + Sₙ·JMEⁿ) / 10⁸` via Horner, equations 10 and 11.
 #[inline]
 #[must_use]
 fn evaluate_periodic_series(subseries: &[&[[f64; 3]]], jme: f64) -> f64 {
@@ -110,9 +44,7 @@ fn evaluate_periodic_series(subseries: &[&[[f64; 3]]], jme: f64) -> f64 {
     }) / 1.0e8
 }
 
-// The constants below mirror Table A4.2 verbatim. Clippy's stylistic checks
-// on numeric literals are silenced here because rounding or substituting
-// would alter the agreement with the published reference values.
+// Table A4.2, verbatim. Clippy's literal-style lints would alter the digits.
 #[allow(
     clippy::unreadable_literal,
     clippy::approx_constant,
@@ -360,11 +292,7 @@ mod tests {
     };
     use crate::test_fixtures::reference_jme;
 
-    /// Reference subseries totals (the raw `Σ A·cos(B + C·JME)` values, before
-    /// the JME-polynomial combination and the `1 / 10⁸` scaling), as published
-    /// in Table A5.1. Splitting them out lets a regression flag the broken
-    /// sub-block instead of pointing at an aggregate `L`/`B`/`R` mismatch.
-    #[allow(clippy::excessive_precision)] // Published trailing digits are pinned for traceability.
+    #[allow(clippy::excessive_precision)]
     const A5_1_L_SUBSERIES: [f64; 6] = [
         172_067_561.526_586,
         628_332_010_650.051_147,
@@ -382,137 +310,99 @@ mod tests {
         1.232_361,
     ];
 
-    /// Hybrid tolerance: tracks the trailing-digit precision of the table
-    /// (≈10⁻⁶ absolute) for small terms while loosening to 1 ulp at the
-    /// magnitude of the largest term (`L1 ≈ 6.28·10¹¹`, where 1 ulp ≈ 10⁻⁴).
+    /// Hybrid tolerance: tracks the table's trailing-digit precision while
+    /// loosening to 1 ulp at the magnitude of the largest term (`L1 ≈ 6·10¹¹`).
     fn assert_close(actual: f64, expected: f64, label: &str) {
         let tolerance = expected.abs().mul_add(1e-12, 1e-6);
         assert!(
             (actual - expected).abs() <= tolerance,
-            "{label}: expected {expected}, got {actual} (|Δ| > {tolerance:e})",
+            "{label}: expected {expected}, got {actual}",
         );
     }
 
-    /// Each `L_k` subseries (radians) must match the value Table A5.1
-    /// reports for that block at the reference JME.
     #[test]
-    fn periodic_subseries_sums_for_l_match_table_a5_1() {
+    fn l_subseries_match_table_a5_1() {
         let jme = reference_jme();
         for (k, expected) in A5_1_L_SUBSERIES.iter().enumerate() {
-            let actual = periodic_subseries_sum(L_TERMS[k], jme);
-            assert_close(actual, *expected, &format!("L{k}"));
+            assert_close(
+                periodic_subseries_sum(L_TERMS[k], jme),
+                *expected,
+                &format!("L{k}"),
+            );
         }
     }
 
-    /// Each `B_k` subseries must reproduce the Table A5.1 value, including
-    /// the negative `B0`, which exercises the signed accumulation path.
     #[test]
-    fn periodic_subseries_sums_for_b_match_table_a5_1() {
+    fn b_subseries_match_table_a5_1() {
         let jme = reference_jme();
         for (k, expected) in A5_1_B_SUBSERIES.iter().enumerate() {
-            let actual = periodic_subseries_sum(B_TERMS[k], jme);
-            assert_close(actual, *expected, &format!("B{k}"));
+            assert_close(
+                periodic_subseries_sum(B_TERMS[k], jme),
+                *expected,
+                &format!("B{k}"),
+            );
         }
     }
 
-    /// Each `R_k` subseries must reproduce the Table A5.1 value. `R2` and
-    /// `R3` are negative, again exercising the signed accumulation path.
     #[test]
-    fn periodic_subseries_sums_for_r_match_table_a5_1() {
+    fn r_subseries_match_table_a5_1() {
         let jme = reference_jme();
         for (k, expected) in A5_1_R_SUBSERIES.iter().enumerate() {
-            let actual = periodic_subseries_sum(R_TERMS[k], jme);
-            assert_close(actual, *expected, &format!("R{k}"));
+            assert_close(
+                periodic_subseries_sum(R_TERMS[k], jme),
+                *expected,
+                &format!("R{k}"),
+            );
         }
     }
 
-    /// Aggregated `L` (after JME polynomial, radian→degree conversion and
-    /// wrapping) must match the published Table A5.1 figure within the
-    /// SPA-stated ±0.0003° envelope by several orders of magnitude.
     #[test]
     fn earth_heliocentric_longitude_matches_table_a5_1() {
         let l = earth_heliocentric_longitude(reference_jme());
-        assert!(
-            (l - 24.018_261_691_7).abs() < 1e-6,
-            "L mismatch at A5.1 reference JME: got {l}",
-        );
+        assert!((l - 24.018_261_691_7).abs() < 1e-6);
     }
 
-    /// Aggregated `B` is signed and tiny (≈10⁻⁴°). The tolerance is set well
-    /// below the magnitude of the value itself so a sign flip would fail.
     #[test]
     fn earth_heliocentric_latitude_matches_table_a5_1() {
         let b = earth_heliocentric_latitude(reference_jme());
-        assert!(
-            (b - -0.000_101_121_9).abs() < 1e-9,
-            "B mismatch at A5.1 reference JME: got {b}",
-        );
+        assert!((b - -0.000_101_121_9).abs() < 1e-9);
     }
 
-    /// Aggregated `R` (in AU) must match Table A5.1. Tolerance below 1e-9
-    /// is well within the ulp of the published value.
     #[test]
     fn earth_radius_vector_matches_table_a5_1() {
         let r = earth_radius_vector(reference_jme());
-        assert!(
-            (r - 0.996_542_297_4).abs() < 1e-9,
-            "R mismatch at A5.1 reference JME: got {r}",
-        );
+        assert!((r - 0.996_542_297_4).abs() < 1e-9);
     }
 
-    /// Step 3.2.6 mandates the half-open interval `[0°, 360°)` for `L`. The
-    /// `L1` term grows by ≈360 000°/JME, so even a one-millennium offset is
-    /// far past one revolution and stresses the wrapping.
     #[test]
     fn earth_heliocentric_longitude_is_wrapped_into_zero_360() {
         for &jme in &[-2.0, -0.5, 0.0, 0.5, 1.5, reference_jme()] {
             let l = earth_heliocentric_longitude(jme);
             assert!(
                 (0.0..360.0).contains(&l),
-                "L escaped [0, 360) at JME = {jme}: got {l}",
+                "L escaped [0, 360) at JME={jme}: {l}"
             );
         }
     }
 
-    /// `B` carries no range constraint and must remain signed.
-    /// At the Table A5.1 reference JME `B` is published as a negative value,
-    /// which would never occur if the function silently wrapped to a
-    /// non-negative range.
     #[test]
-    fn earth_heliocentric_latitude_preserves_sign() {
-        let b = earth_heliocentric_latitude(reference_jme());
-        assert!(b < 0.0, "B must be signed; got {b} at the A5.1 JME");
+    fn earth_heliocentric_latitude_is_signed() {
+        assert!(earth_heliocentric_latitude(reference_jme()) < 0.0);
     }
 
-    /// `R` is a physical distance and must stay finite and positive across
-    /// the SPA validity window (-2000 to 6000), which spans roughly
-    /// JME ∈ `[-4, 4]`.
     #[test]
-    fn earth_radius_vector_is_strictly_positive_across_validity_window() {
+    fn earth_radius_vector_is_positive_across_validity_window() {
         for &jme in &[-4.0, -1.0, 0.0, 1.0, 4.0] {
             let r = earth_radius_vector(jme);
-            assert!(
-                r.is_finite() && r > 0.0,
-                "R must be finite and positive at JME = {jme}: got {r}",
-            );
+            assert!(r.is_finite() && r > 0.0);
         }
     }
 
-    /// `evaluate_periodic_series` reduces to a single subseries when the
-    /// outer slice has length 1, and that single value is returned divided
-    /// by 10⁸. This pins the Horner reduction at the polynomial's base case
-    /// and the `1 / 10⁸` scaling demanded by equation 11.
     #[test]
-    fn evaluate_periodic_series_reduces_to_scaled_subseries_when_polynomial_is_constant() {
-        // A single row whose B and C are both 0 makes the sum equal to A,
-        // independent of JME; the only thing the function should add is the
-        // 1/10⁸ scaling.
+    fn evaluate_periodic_series_scales_by_one_over_10e8() {
+        // A single row with B=C=0 makes the sum equal to A.
         let single: &[[f64; 3]] = &[[1.0e8, 0.0, 0.0]];
-        let outer: &[&[[f64; 3]]; 1] = &[single];
-        let value = evaluate_periodic_series(outer, 0.123_456);
-        assert!(
-            (value - 1.0).abs() < f64::EPSILON,
-            "constant polynomial must collapse to the scaled subseries: got {value}",
-        );
+        let value = evaluate_periodic_series(&[single], 0.123_456);
+        assert!((value - 1.0).abs() < f64::EPSILON);
     }
 }
