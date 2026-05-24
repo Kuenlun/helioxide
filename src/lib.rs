@@ -2,9 +2,7 @@
 // helioxide - Rust implementation of NREL Solar Position Algorithm (SPA)
 // Copyright (c) 2026 Juan Luis Leal Contreras (Kuenlun)
 
-// Allow `#[coverage(off)]` on test modules under `--cfg coverage_nightly` (nightly-only).
 #![cfg_attr(all(test, coverage_nightly), feature(coverage_attribute))]
-#![feature(const_trait_impl)]
 
 pub mod apparent;
 pub mod delta_t;

@@ -3,15 +3,11 @@
 // Copyright (c) 2026 Juan Luis Leal Contreras (Kuenlun)
 
 //! Time inputs for the SPA pipeline.
-//!
-//! [`SpaDateTime`] pairs a [`chrono::DateTime`] with the DUT1 (= UT1 − UTC)
-//! correction required by NREL's Solar Position Algorithm. DUT1 is validated
-//! against the IERS bound of ±1 s on construction.
 
 use chrono::{DateTime, TimeZone};
 use thiserror::Error;
 
-/// DUT1 (= UT1 − UTC) is bounded by ±1 s; leap seconds are inserted to keep it inside that range.
+/// IERS bound on `|DUT1| < 1 s` (leap seconds keep UT1 within this band).
 const DUT1_LIMIT_SECONDS: f64 = 1.0;
 
 #[derive(Debug, Clone, PartialEq, Error)]
@@ -20,23 +16,9 @@ pub enum SpaTimeError {
     Dut1OutOfRange(f64),
 }
 
-/// Instant tagged with the DUT1 (= UT1 − UTC) correction required by the
-/// NREL Solar Position Algorithm.
+/// Instant tagged with `DUT1 = UT1 − UTC` (seconds).
 ///
-/// Use [`SpaDateTime::new`] when DUT1 is unknown (defaults to 0). Use
-/// [`SpaDateTime::try_new`] when an IERS-published value is available.
-///
-/// # Examples
-///
-/// ```
-/// use chrono::Utc;
-/// use helioxide::SpaDateTime;
-///
-/// let now = Utc::now();
-/// let default_dut1 = SpaDateTime::new(now);
-/// let with_iers = SpaDateTime::try_new(now, -0.123).expect("DUT1 inside (-1, 1) s");
-/// let via_into: SpaDateTime<_> = now.into();
-/// ```
+/// Default DUT1 is `0`. Use [`Self::try_new`] to attach an IERS value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpaDateTime<Tz: TimeZone> {
     datetime: DateTime<Tz>,
@@ -44,7 +26,7 @@ pub struct SpaDateTime<Tz: TimeZone> {
 }
 
 impl<Tz: TimeZone> SpaDateTime<Tz> {
-    /// Builds a [`SpaDateTime`] with `dut1 = 0`.
+    /// Build with `dut1 = 0`.
     #[must_use]
     pub const fn new(datetime: DateTime<Tz>) -> Self {
         Self {
@@ -53,18 +35,14 @@ impl<Tz: TimeZone> SpaDateTime<Tz> {
         }
     }
 
-    /// Builds a [`SpaDateTime`] with the given DUT1 in seconds.
-    ///
     /// # Errors
-    /// Returns [`SpaTimeError::Dut1OutOfRange`] if `dut1` is non-finite or `|dut1| >= 1`.
+    /// [`SpaTimeError::Dut1OutOfRange`] if `dut1` is non-finite or `|dut1| >= 1`.
     pub fn try_new(datetime: DateTime<Tz>, dut1: f64) -> Result<Self, SpaTimeError> {
         Self::new(datetime).try_with_dut1(dut1)
     }
 
-    /// Returns a copy of `self` with the given DUT1 in seconds.
-    ///
     /// # Errors
-    /// Returns [`SpaTimeError::Dut1OutOfRange`] if `dut1` is non-finite or `|dut1| >= 1`.
+    /// [`SpaTimeError::Dut1OutOfRange`] if `dut1` is non-finite or `|dut1| >= 1`.
     pub fn try_with_dut1(mut self, dut1: f64) -> Result<Self, SpaTimeError> {
         if !dut1.is_finite() || dut1.abs() >= DUT1_LIMIT_SECONDS {
             return Err(SpaTimeError::Dut1OutOfRange(dut1));
@@ -83,11 +61,7 @@ impl<Tz: TimeZone> SpaDateTime<Tz> {
         self.dut1
     }
 
-    /// Retargets the wall-clock instant while keeping DUT1.
-    ///
-    /// DUT1 is not revalidated: every path that mutates `dut1` runs
-    /// through [`SpaDateTime::try_with_dut1`], so `self`'s value is
-    /// already known to satisfy the IERS bound.
+    /// Swap the wall-clock instant, preserving DUT1 (already validated on `self`).
     #[must_use]
     pub const fn with_datetime<NewTz: TimeZone>(
         &self,
@@ -101,7 +75,6 @@ impl<Tz: TimeZone> SpaDateTime<Tz> {
 }
 
 impl<Tz: TimeZone> From<DateTime<Tz>> for SpaDateTime<Tz> {
-    /// Equivalent to [`SpaDateTime::new`]: wraps the instant with `dut1 = 0`.
     fn from(datetime: DateTime<Tz>) -> Self {
         Self::new(datetime)
     }
@@ -113,81 +86,53 @@ mod tests {
     use super::*;
     use chrono::Utc;
 
-    /// Throwaway timestamp; its value is irrelevant to DUT1 validation.
     fn dt() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 5, 9, 12, 9, 30).unwrap()
     }
 
-    /// Pins the documented default of [`SpaDateTime::new`].
-    // Direct float comparison is safe here: 0.0 is a documented constant
-    // stored verbatim, with no arithmetic that could introduce rounding.
     #[test]
     #[allow(clippy::float_cmp)]
-    fn new_initialises_dut1_to_zero() {
+    fn new_defaults_dut1_to_zero() {
         assert_eq!(SpaDateTime::new(dt()).dut1(), 0.0);
     }
 
-    /// Every finite DUT1 strictly inside (-1, 1) s must round-trip through
-    /// the validating constructor and the getter.
-    // Direct float comparison is safe here: the same bit pattern flows
-    // through the constructor and getter unchanged, with no arithmetic.
     #[test]
     #[allow(clippy::float_cmp)]
-    fn try_with_dut1_accepts_finite_values_inside_open_unit_interval() {
+    fn try_with_dut1_accepts_open_unit_interval() {
         for dut1 in [-0.999, -0.5, 0.0, 0.5, 0.999] {
-            let stored = SpaDateTime::new(dt())
-                .try_with_dut1(dut1)
-                .expect("|dut1| < 1 must be accepted")
-                .dut1();
+            let stored = SpaDateTime::new(dt()).try_with_dut1(dut1).unwrap().dut1();
             assert_eq!(stored, dut1);
         }
     }
 
-    /// Pins the *open* interval: |dut1| = 1 must be rejected, matching the
-    /// IERS bound advertised by the `Display` message.
-    // Direct float comparison is safe here: the error variant echoes the
-    // input verbatim, so we are comparing identical bit patterns.
     #[test]
     #[allow(clippy::float_cmp)]
-    fn try_with_dut1_rejects_values_at_or_beyond_unit_boundary() {
+    fn try_with_dut1_rejects_boundary_and_beyond() {
         for dut1 in [-1.5, -1.0, 1.0, 1.5] {
-            let err = SpaDateTime::new(dt())
-                .try_with_dut1(dut1)
-                .expect_err("|dut1| >= 1 must be rejected");
-            match err {
-                SpaTimeError::Dut1OutOfRange(reported) => {
-                    assert_eq!(reported, dut1, "error must echo the offending DUT1");
-                }
-            }
+            let SpaTimeError::Dut1OutOfRange(reported) =
+                SpaDateTime::new(dt()).try_with_dut1(dut1).unwrap_err();
+            assert_eq!(reported, dut1);
         }
     }
 
-    /// `NaN.abs() >= 1` is `false`, so the magnitude check alone would let
-    /// non-finite values through. This pins `is_finite()` as the guard.
     #[test]
-    fn try_with_dut1_rejects_non_finite_values() {
+    fn try_with_dut1_rejects_non_finite() {
         for dut1 in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            let result = SpaDateTime::new(dt()).try_with_dut1(dut1);
-            assert!(
-                matches!(result, Err(SpaTimeError::Dut1OutOfRange(_))),
-                "non-finite DUT1 ({dut1}) must be rejected"
-            );
+            assert!(matches!(
+                SpaDateTime::new(dt()).try_with_dut1(dut1),
+                Err(SpaTimeError::Dut1OutOfRange(_)),
+            ));
         }
     }
 
-    /// Pins the [`From`] impl as a sugar-only alias for [`SpaDateTime::new`],
-    /// which also enables `impl Into<SpaDateTime<_>>` bounds at call sites.
     #[test]
-    fn from_datetime_is_equivalent_to_new() {
-        let via_new = SpaDateTime::new(dt());
+    fn from_datetime_equals_new() {
         let via_into: SpaDateTime<Utc> = dt().into();
-        assert_eq!(via_new, via_into);
+        assert_eq!(SpaDateTime::new(dt()), via_into);
     }
 
-    /// Pins the public surface of [`SpaDateTime::try_new`]: it must validate
-    /// DUT1 with the same rules as [`SpaDateTime::try_with_dut1`].
     #[test]
-    fn try_new_validates_dut1_like_try_with_dut1() {
+    fn try_new_validates_like_try_with_dut1() {
         assert!(SpaDateTime::try_new(dt(), 0.5).is_ok());
         assert!(matches!(
             SpaDateTime::try_new(dt(), 1.0),
@@ -199,24 +144,13 @@ mod tests {
         ));
     }
 
-    /// Pins the contract of `with_datetime`: DUT1 is preserved
-    /// bit-for-bit and the datetime is swapped. Direct f64 equality
-    /// is safe because the same bit pattern flows through the copy.
     #[test]
     #[allow(clippy::float_cmp)]
-    fn with_datetime_preserves_dut1_and_swaps_wall_clock_instant() {
-        let original = SpaDateTime::try_new(dt(), 0.25).expect("DUT1 in (-1, 1) must validate");
+    fn with_datetime_preserves_dut1_and_swaps_instant() {
+        let original = SpaDateTime::try_new(dt(), 0.25).unwrap();
         let new_instant = Utc.with_ymd_and_hms(2030, 1, 2, 3, 4, 5).unwrap();
         let retargeted = original.with_datetime(new_instant);
-        assert_eq!(
-            retargeted.dut1(),
-            0.25,
-            "with_datetime must preserve DUT1 verbatim",
-        );
-        assert_eq!(
-            retargeted.datetime(),
-            &new_instant,
-            "with_datetime must swap the wall-clock instant",
-        );
+        assert_eq!(retargeted.dut1(), 0.25);
+        assert_eq!(retargeted.datetime(), &new_instant);
     }
 }

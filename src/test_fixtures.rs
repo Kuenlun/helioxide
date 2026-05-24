@@ -3,9 +3,6 @@
 // Copyright (c) 2026 Juan Luis Leal Contreras (Kuenlun)
 
 //! Shared fixtures for the per-module unit tests.
-//!
-//! Anything reused by more than one `#[cfg(test)] mod tests { … }` lives here
-//! to keep the individual modules from drifting apart.
 
 use crate::SpaDateTime;
 use crate::apparent::{aberration_correction, apparent_sun_longitude};
@@ -29,55 +26,34 @@ use crate::parallax::{equatorial_horizontal_parallax, topocentric_equatorial_coo
 use crate::sidereal::{apparent_sidereal_time, mean_sidereal_time};
 use chrono::{TimeZone, Utc};
 
-/// JD for the Table A5.1 worked example: 2003-10-17 12:30:30 LST, TZ = -7 h
-/// (i.e. 19:30:30 UT). The JD is reconstructed from the civil instant
-/// rather than the report's six-decimal printed value, because the latter
-/// loses ~2·10⁻⁷ d that `L1 ≈ 6·10¹¹` amplifies into the trailing decimals
-/// of every published subseries total. The diurnal coefficient of
-/// equation 28 (≈ 360.99°/d) would also amplify it into ~8·10⁻⁵° on `ν₀`.
+/// JD for Table A5.1: 2003-10-17 12:30:30 LST at TZ = -7 h (19:30:30 UT).
+/// Reconstructed from the civil instant rather than the report's six-decimal
+/// printed value, which loses ~2e-7 d that `L1 ≈ 6e11` amplifies into the
+/// trailing decimals.
 pub fn reference_jd() -> f64 {
-    let utc = Utc
-        .with_ymd_and_hms(2003, 10, 17, 19, 30, 30)
-        .single()
-        .expect("non-ambiguous reference instant");
+    let utc = Utc.with_ymd_and_hms(2003, 10, 17, 19, 30, 30).unwrap();
     calculate_julian_day(&SpaDateTime::new(utc))
 }
 
-/// JCE for the Table A5.1 worked example with ΔT = 67 s. See
-/// [`reference_jd`] for the civil instant the chain originates from.
+/// JCE for Table A5.1 with ΔT = 67 s.
 pub fn reference_jce() -> f64 {
     let jde = calculate_julian_ephemeris_day(reference_jd(), 67.0);
     calculate_julian_ephemeris_century(jde)
 }
 
-/// JME for the Table A5.1 worked example. See [`reference_jd`] for the
-/// civil instant the chain originates from.
+/// JME for Table A5.1.
 pub fn reference_jme() -> f64 {
     calculate_julian_ephemeris_millennium(reference_jce())
 }
 
-/// Reference observer site from Appendix A.5: latitude `φ` (positive
-/// north of the equator per section 3.12.2), longitude `σ` (positive
-/// east of Greenwich per section 3.11), elevation `E` above sea level
-/// per section 3.12.3. Reused by every reference-instant test so the
-/// published civil instant feeds a single, canonical observer.
+/// Reference observer site from appendix A.5.
 pub const REFERENCE_LATITUDE_DEGREES: f64 = 39.742_476;
 pub const REFERENCE_LONGITUDE_DEGREES: f64 = -105.178_6;
 pub const REFERENCE_ELEVATION_METRES: f64 = 1830.14;
-
-/// Reference observer pressure for the Table A5.1 worked example
-/// (millibars), per section A.5. Feeds equation 42's pressure ratio.
 pub const REFERENCE_PRESSURE_MILLIBARS: f64 = 820.0;
-/// Reference observer temperature for the Table A5.1 worked example
-/// (degrees Celsius), per section A.5. Feeds equation 42's temperature
-/// ratio.
 pub const REFERENCE_TEMPERATURE_CELSIUS: f64 = 11.0;
 
-/// Drives the full upstream chain (sections 3.2 through 3.13) to produce
-/// `(δ', H')` at the Table A5.1 reference instant. Reused by every
-/// section-3.14+ reference test so a single integration regression
-/// upstream surfaces in exactly one place rather than corrupting
-/// independent reference checks.
+/// `(δ', H')` at the Table A5.1 reference instant.
 pub fn reference_delta_prime_and_h_prime() -> (f64, f64) {
     let jd = reference_jd();
     let jce = reference_jce();
@@ -110,19 +86,13 @@ pub fn reference_delta_prime_and_h_prime() -> (f64, f64) {
     (topocentric.declination, h_prime)
 }
 
-/// Drives the full upstream chain plus equation 41 to produce `e₀` at the
-/// Table A5.1 reference instant. Reused by the refraction, zenith, and
-/// downstream reference tests so a single integration regression upstream
-/// surfaces in exactly one place.
+/// `e₀` at the Table A5.1 reference instant.
 pub fn reference_elevation_without_refraction() -> f64 {
     let (delta_prime, h_prime) = reference_delta_prime_and_h_prime();
     topocentric_elevation_without_refraction(REFERENCE_LATITUDE_DEGREES, delta_prime, h_prime)
 }
 
-/// Drives the full upstream chain (sections 3.2 through 3.15) to produce
-/// `(θ, Γ)` at the Table A5.1 reference instant. Reused by section-3.16+
-/// reference tests so a single integration regression upstream surfaces
-/// in exactly one place.
+/// `(θ, Γ)` at the Table A5.1 reference instant.
 pub fn reference_theta_and_gamma() -> (f64, f64) {
     let (delta_prime, h_prime) = reference_delta_prime_and_h_prime();
     let e0 =
