@@ -13,9 +13,9 @@ categories = ["science", "mathematics"]
 license-header = ".github/license_header.rs"
 
 [dependencies]
-chrono = "0.4.44"
-chrono-tz = "0.10.4"
-thiserror = "2.0.18"
+chrono = "0.4"
+chrono-tz = "0.10"
+thiserror = "2"
 
 [lints.rust]
 unsafe_code = "forbid"
