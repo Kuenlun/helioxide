@@ -153,22 +153,21 @@ pub fn delta_t_seconds_for_datetime<Tz: TimeZone>(datetime: &DateTime<Tz>) -> f6
 /// interpolated between adjacent monthly samples of the USNO table. Returns
 /// [`None`] when the date lies outside the published window.
 #[must_use]
+#[allow(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "month fits in 1..=12 and the post-check `idx < 0` rules out sign loss"
+)]
 pub fn observed_delta_t_seconds_for_datetime<Tz: TimeZone>(datetime: &DateTime<Tz>) -> Option<f64> {
     let naive = datetime.naive_utc();
     let year = naive.year();
     let month = naive.month();
 
-    // `month` and `OBSERVED_BASE_MONTH` are both in 1..=12, so the casts and
-    // subtraction stay well inside `i32` and never wrap.
-    let month_offset = i32::try_from(month).ok()? - OBSERVED_BASE_MONTH;
-    let idx = year
-        .checked_sub(OBSERVED_BASE_YEAR)?
-        .checked_mul(12)?
-        .checked_add(month_offset)?;
-    let idx = usize::try_from(idx).ok()?;
-    if idx + 1 >= OBSERVED_DELTA_T.len() {
+    let idx = (year - OBSERVED_BASE_YEAR) * 12 + (month as i32 - OBSERVED_BASE_MONTH);
+    if idx < 0 || idx as usize + 1 >= OBSERVED_DELTA_T.len() {
         return None;
     }
+    let idx = idx as usize;
 
     let seconds_into_day =
         f64::from(naive.nanosecond()).mul_add(1.0e-9, f64::from(naive.num_seconds_from_midnight()));
