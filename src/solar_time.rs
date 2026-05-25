@@ -240,14 +240,31 @@ impl<Tz: TimeZone> SolarDay<Tz> {
     /// the result is rendered on the same timezone. Pass a [`DateTime<Utc>`]
     /// to anchor on the UTC civil day.
     ///
-    /// `delta_t_seconds` is `ΔT = TT − UT1`. `observer.elevation`, `pressure`
-    /// and `temperature` are unused: appendix A.2 absorbs the horizon-level
-    /// refraction into [`SUN_ELEVATION_AT_HORIZON_DEGREES`].
+    /// `ΔT` is resolved via [`crate::delta_t::delta_t_seconds_for_datetime`]
+    /// (observed USNO value when available, polynomial approximation
+    /// otherwise). Reach for [`Self::compute_with_delta_t`] when a specific
+    /// `ΔT` is required, for example to reproduce NREL reference values.
+    ///
+    /// `observer.elevation`, `pressure` and `temperature` are unused:
+    /// appendix A.2 absorbs the horizon-level refraction into
+    /// [`SUN_ELEVATION_AT_HORIZON_DEGREES`].
     ///
     /// [`DateTime<Utc>`]: chrono::DateTime
     #[must_use]
+    pub fn compute(datetime: &SpaDateTime<Tz>, observer: Observer) -> Self {
+        let delta_t = crate::delta_t::delta_t_seconds_for_datetime(datetime.datetime());
+        Self::compute_with_delta_t(datetime, delta_t, observer)
+    }
+
+    /// Compute the same sunrise, transit and sunset readout as [`Self::compute`]
+    /// with an explicit `ΔT = TT − UT1` (seconds).
+    #[must_use]
     #[allow(clippy::many_single_char_names, clippy::similar_names)]
-    pub fn compute(datetime: &SpaDateTime<Tz>, delta_t_seconds: f64, observer: Observer) -> Self {
+    pub fn compute_with_delta_t(
+        datetime: &SpaDateTime<Tz>,
+        delta_t_seconds: f64,
+        observer: Observer,
+    ) -> Self {
         let tz = datetime.datetime().timezone();
         let utc_anchor = local_civil_midnight_in_utc(datetime.datetime());
         let datetime_at_anchor = datetime.with_datetime(utc_anchor);
@@ -518,7 +535,7 @@ mod tests {
     }
 
     fn reference_solar_day() -> SolarDay<Utc> {
-        SolarDay::compute(
+        SolarDay::compute_with_delta_t(
             &reference_datetime(),
             REFERENCE_DELTA_T_SECONDS,
             reference_observer(),
@@ -575,7 +592,11 @@ mod tests {
                 .with_ymd_and_hms(2003, 10, 17, 21, 30, 30)
                 .unwrap(),
         );
-        let day = SolarDay::compute(&madrid_dt, REFERENCE_DELTA_T_SECONDS, reference_observer());
+        let day = SolarDay::compute_with_delta_t(
+            &madrid_dt,
+            REFERENCE_DELTA_T_SECONDS,
+            reference_observer(),
+        );
 
         let expected_sunrise = chrono_tz::Europe::Madrid
             .with_ymd_and_hms(2003, 10, 17, 15, 12, 43)
@@ -611,9 +632,13 @@ mod tests {
         let madrid = chrono_tz::Europe::Madrid;
         let morning = SpaDateTime::new(madrid.with_ymd_and_hms(2003, 10, 17, 9, 0, 0).unwrap());
         let early = SpaDateTime::new(madrid.with_ymd_and_hms(2003, 10, 17, 1, 0, 0).unwrap());
-        let day_morning =
-            SolarDay::compute(&morning, REFERENCE_DELTA_T_SECONDS, reference_observer());
-        let day_early = SolarDay::compute(&early, REFERENCE_DELTA_T_SECONDS, reference_observer());
+        let day_morning = SolarDay::compute_with_delta_t(
+            &morning,
+            REFERENCE_DELTA_T_SECONDS,
+            reference_observer(),
+        );
+        let day_early =
+            SolarDay::compute_with_delta_t(&early, REFERENCE_DELTA_T_SECONDS, reference_observer());
         assert!(
             (day_morning.transit - day_early.transit)
                 .num_milliseconds()
@@ -632,7 +657,7 @@ mod tests {
         let azores = chrono_tz::Atlantic::Azores;
         let dt = SpaDateTime::new(azores.with_ymd_and_hms(2003, 10, 26, 12, 0, 0).unwrap());
         let observer = Observer::try_new(37.741, -25.668, 50.0, 1015.0, 18.0).unwrap();
-        let day = SolarDay::compute(&dt, REFERENCE_DELTA_T_SECONDS, observer);
+        let day = SolarDay::compute_with_delta_t(&dt, REFERENCE_DELTA_T_SECONDS, observer);
         assert!(day.sunrise.unwrap() < day.transit);
         assert!(day.transit < day.sunset.unwrap());
     }
@@ -643,19 +668,19 @@ mod tests {
         let sao_paulo = chrono_tz::America::Sao_Paulo;
         let dt = SpaDateTime::new(sao_paulo.with_ymd_and_hms(2017, 10, 15, 12, 0, 0).unwrap());
         let observer = Observer::try_new(-23.533, -46.625, 760.0, 1010.0, 22.0).unwrap();
-        let day = SolarDay::compute(&dt, REFERENCE_DELTA_T_SECONDS, observer);
+        let day = SolarDay::compute_with_delta_t(&dt, REFERENCE_DELTA_T_SECONDS, observer);
         assert!(day.sunrise.unwrap() < day.transit);
         assert!(day.transit < day.sunset.unwrap());
     }
 
     #[test]
     fn solar_day_propagates_dut1_into_event_times() {
-        let zero = SolarDay::compute(
+        let zero = SolarDay::compute_with_delta_t(
             &reference_datetime(),
             REFERENCE_DELTA_T_SECONDS,
             reference_observer(),
         );
-        let with_dut1 = SolarDay::compute(
+        let with_dut1 = SolarDay::compute_with_delta_t(
             &reference_datetime().try_with_dut1(0.5).unwrap(),
             REFERENCE_DELTA_T_SECONDS,
             reference_observer(),
@@ -669,7 +694,7 @@ mod tests {
     fn solar_day_polar_night_returns_none() {
         let polar = Observer::try_new(80.0, 0.0, 0.0, 1010.0, -20.0).unwrap();
         let solstice = SpaDateTime::new(Utc.with_ymd_and_hms(2026, 12, 21, 12, 0, 0).unwrap());
-        let day = SolarDay::compute(&solstice, 70.0, polar);
+        let day = SolarDay::compute_with_delta_t(&solstice, 70.0, polar);
         assert!(day.sunrise.is_none());
         assert!(day.sunset.is_none());
     }
@@ -678,7 +703,7 @@ mod tests {
     fn solar_day_polar_day_returns_none() {
         let polar = Observer::try_new(80.0, 0.0, 0.0, 1010.0, 0.0).unwrap();
         let solstice = SpaDateTime::new(Utc.with_ymd_and_hms(2026, 6, 21, 12, 0, 0).unwrap());
-        let day = SolarDay::compute(&solstice, 70.0, polar);
+        let day = SolarDay::compute_with_delta_t(&solstice, 70.0, polar);
         assert!(day.sunrise.is_none());
         assert!(day.sunset.is_none());
     }
@@ -969,7 +994,7 @@ mod tests {
     fn solar_day_unwraps_sunrise_to_previous_ut_day_for_east_observer() {
         let observer = Observer::try_new(-33.8, 150.0, 0.0, 1010.0, 18.0).unwrap();
         let utc_noon = SpaDateTime::new(Utc.with_ymd_and_hms(2026, 3, 20, 12, 0, 0).unwrap());
-        let day = SolarDay::compute(&utc_noon, 70.0, observer);
+        let day = SolarDay::compute_with_delta_t(&utc_noon, 70.0, observer);
         let sunrise = day.sunrise.unwrap();
         assert!(sunrise < day.transit);
         assert!(day.transit < day.sunset.unwrap());
