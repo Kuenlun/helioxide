@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/Kuenlun/helioxide/compare/v0.4.0...v0.5.0) - 2026-05-25
+
+### Added
+
+- *(spa)* [**breaking**] auto-resolve ΔT in SolarPosition and SolarDay compute ([#37](https://github.com/Kuenlun/helioxide/pull/37))
+- *(delta_t)* prefer observed USNO ΔT with polynomial fallback ([#36](https://github.com/Kuenlun/helioxide/pull/36))
+- *(spa)* expose reference atmospheres and Observer constructors ([#32](https://github.com/Kuenlun/helioxide/pull/32))
+- *(delta_t)* approximate ΔT via Espenak-Meeus piecewise polynomial ([#31](https://github.com/Kuenlun/helioxide/pull/31))
+
+### Other
+
+- *(deps)* loosen version requirements ([#35](https://github.com/Kuenlun/helioxide/pull/35))
+- [**breaking**] trim verbose prose and simplify int helper ([#34](https://github.com/Kuenlun/helioxide/pull/34))
+- *(spa)* [**breaking**] make Observer and Surface valid by construction ([#33](https://github.com/Kuenlun/helioxide/pull/33))
+- integrate lockpick ([#29](https://github.com/Kuenlun/helioxide/pull/29))
+
 ### Added
 
 - Embed the USNO monthly `ΔT` table (Feb 1973 through Apr 2026, 639 samples) in `delta_t`, with `observed_delta_t_seconds_for_datetime` linearly interpolating between adjacent monthly anchors (honouring the Gregorian leap rule) and returning `None` outside the published window, and `delta_t_seconds_for_datetime` preferring the observed value and falling back to the existing Espenak-Meeus polynomial otherwise.
