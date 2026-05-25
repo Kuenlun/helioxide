@@ -298,13 +298,30 @@ pub struct SolarPosition {
 }
 
 impl SolarPosition {
-    /// Run the full SPA pipeline.
-    ///
-    /// `delta_t` is `ΔT = TT − UT1` (seconds, ≈ 69.5 s in 2026). Pass
+    /// Run the full SPA pipeline, resolving `ΔT` via
+    /// [`crate::delta_t::delta_t_seconds_for_datetime`] (observed USNO value
+    /// when available, polynomial approximation otherwise). Pass
     /// [`Surface::horizontal`] when only the topocentric position is needed.
+    /// Use [`Self::compute_with_delta_t`] to pin a specific `ΔT`.
+    #[must_use]
+    pub fn compute<Tz: TimeZone>(
+        datetime: &SpaDateTime<Tz>,
+        observer: Observer,
+        surface: Surface,
+    ) -> Self {
+        let delta_t = crate::delta_t::delta_t_seconds_for_datetime(datetime.datetime());
+        Self::compute_with_delta_t(datetime, delta_t, observer, surface)
+    }
+
+    /// Run the full SPA pipeline with an explicit `ΔT = TT − UT1` (seconds,
+    /// ≈ 69.1 s in 2026).
+    ///
+    /// Reach for this when reproducing NREL reference cases or honouring an
+    /// IERS bulletin value; otherwise [`Self::compute`] picks the best
+    /// available `ΔT` automatically.
     #[must_use]
     #[allow(clippy::many_single_char_names, clippy::similar_names)]
-    pub fn compute<Tz: TimeZone>(
+    pub fn compute_with_delta_t<Tz: TimeZone>(
         datetime: &SpaDateTime<Tz>,
         delta_t: f64,
         observer: Observer,
@@ -633,7 +650,7 @@ mod tests {
     }
 
     fn reference_position() -> SolarPosition {
-        SolarPosition::compute(
+        SolarPosition::compute_with_delta_t(
             &reference_datetime(),
             REFERENCE_DELTA_T_SECONDS,
             reference_observer(),
@@ -696,7 +713,7 @@ mod tests {
 
         let dt = reference_datetime();
         let observer = reference_observer();
-        let p = SolarPosition::compute(
+        let p = SolarPosition::compute_with_delta_t(
             &dt,
             REFERENCE_DELTA_T_SECONDS,
             observer,

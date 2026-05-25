@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Embed the USNO monthly `ΔT` table (Feb 1973 through Apr 2026, 639 samples) in `delta_t`, with `observed_delta_t_seconds_for_datetime` linearly interpolating between adjacent monthly anchors (honouring the Gregorian leap rule) and returning `None` outside the published window, and `delta_t_seconds_for_datetime` preferring the observed value and falling back to the existing Espenak-Meeus polynomial otherwise.
+
+### Changed
+
+- **BREAKING:** `SolarPosition::compute` and `SolarDay::compute` no longer take a `delta_t` argument: they now resolve `ΔT` automatically via `delta_t_seconds_for_datetime`. The previous explicit-`ΔT` signatures live on as `SolarPosition::compute_with_delta_t` and `SolarDay::compute_with_delta_t` for NREL reference cases and IERS-bulletin overrides.
+
 ## [0.4.0](https://github.com/Kuenlun/helioxide/compare/v0.3.0...v0.4.0) - 2026-05-11
 
 ### Added
