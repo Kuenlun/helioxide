@@ -38,14 +38,17 @@ mod tests {
     use crate::obliquity::true_obliquity_of_ecliptic;
     use crate::test_fixtures::{reference_jce, reference_jd, reference_jme};
 
+    // ν₀ and ν are not printed in Table A5.1; the expected values below are
+    // the NREL reference implementation's output for the same instant
+    // (ν is also derivable from the table as H − σ + α).
     #[test]
-    fn mean_sidereal_time_matches_table_a5_1() {
+    fn mean_sidereal_time_matches_reference_implementation() {
         let nu0 = mean_sidereal_time(reference_jd());
         assert!((nu0 - 318.515_578).abs() < 1e-4);
     }
 
     #[test]
-    fn apparent_sidereal_time_matches_table_a5_1() {
+    fn apparent_sidereal_time_matches_reference_implementation() {
         let (delta_psi, delta_epsilon) = nutation_in_longitude_and_obliquity(reference_jce());
         let epsilon = true_obliquity_of_ecliptic(reference_jme(), delta_epsilon);
         let nu = apparent_sidereal_time(mean_sidereal_time(reference_jd()), delta_psi, epsilon);

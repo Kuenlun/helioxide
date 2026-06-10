@@ -292,25 +292,20 @@ pub struct SolarPosition {
     pub astronomers_azimuth_signed: f64,
     pub topocentric_azimuth: f64,
 
-    pub surface_incidence: f64,
-
     pub equation_of_time: f64,
 }
 
 impl SolarPosition {
     /// Run the full SPA pipeline, resolving `ΔT` via
     /// [`crate::delta_t::delta_t_seconds_for_datetime`] (observed USNO value
-    /// when available, polynomial approximation otherwise). Pass
-    /// [`Surface::horizontal`] when only the topocentric position is needed.
-    /// Use [`Self::compute_with_delta_t`] to pin a specific `ΔT`.
+    /// when available, polynomial approximation otherwise). Use
+    /// [`Self::compute_with_delta_t`] to pin a specific `ΔT`, and
+    /// [`Self::surface_incidence`] for the angle of incidence on a tilted
+    /// surface.
     #[must_use]
-    pub fn compute<Tz: TimeZone>(
-        datetime: &SpaDateTime<Tz>,
-        observer: Observer,
-        surface: Surface,
-    ) -> Self {
+    pub fn compute<Tz: TimeZone>(datetime: &SpaDateTime<Tz>, observer: Observer) -> Self {
         let delta_t = crate::delta_t::delta_t_seconds_for_datetime(datetime.datetime());
-        Self::compute_with_delta_t(datetime, delta_t, observer, surface)
+        Self::compute_with_delta_t(datetime, delta_t, observer)
     }
 
     /// Run the full SPA pipeline with an explicit `ΔT = TT − UT1` (seconds,
@@ -325,13 +320,12 @@ impl SolarPosition {
         datetime: &SpaDateTime<Tz>,
         delta_t: f64,
         observer: Observer,
-        surface: Surface,
     ) -> Self {
-        let jd = julian::calculate_julian_day(datetime);
-        let jde = julian::calculate_julian_ephemeris_day(jd, delta_t);
-        let jc = julian::calculate_julian_century(jd);
-        let jce = julian::calculate_julian_ephemeris_century(jde);
-        let jme = julian::calculate_julian_ephemeris_millennium(jce);
+        let jd = julian::julian_day(datetime);
+        let jde = julian::julian_ephemeris_day(jd, delta_t);
+        let jc = julian::julian_century(jd);
+        let jce = julian::julian_ephemeris_century(jde);
+        let jme = julian::julian_ephemeris_millennium(jce);
 
         let l = heliocentric::earth_heliocentric_longitude(jme);
         let b = heliocentric::earth_heliocentric_latitude(jme);
@@ -385,13 +379,6 @@ impl SolarPosition {
         let gamma_signed = horizontal::astronomers_azimuth_signed(gamma);
         let azimuth = horizontal::topocentric_azimuth_angle(gamma);
 
-        let incidence_angle = incidence::surface_incidence_angle(
-            zenith,
-            gamma,
-            surface.slope(),
-            surface.azimuth_rotation(),
-        );
-
         let m = equation_of_time::sun_mean_longitude(jme);
         let eot = equation_of_time::equation_of_time(m, alpha, delta_psi, epsilon);
 
@@ -434,9 +421,24 @@ impl SolarPosition {
             astronomers_azimuth: gamma,
             astronomers_azimuth_signed: gamma_signed,
             topocentric_azimuth: azimuth,
-            surface_incidence: incidence_angle,
             equation_of_time: eot,
         }
+    }
+
+    /// Angle of incidence `I` (degrees) of the sun on `surface`.
+    /// Section 3.16, equation 47.
+    ///
+    /// A pure readout of the already-computed `(θ, Γ)`, so one position can
+    /// serve any number of surface orientations.
+    #[inline]
+    #[must_use]
+    pub fn surface_incidence(&self, surface: Surface) -> f64 {
+        incidence::surface_incidence_angle(
+            self.topocentric_zenith,
+            self.astronomers_azimuth,
+            surface.slope(),
+            surface.azimuth_rotation(),
+        )
     }
 }
 
@@ -605,7 +607,6 @@ impl fmt::Display for SolarPosition {
             self.astronomers_azimuth_signed
         )?;
         writeln!(f, "Topocentric azimuth Φ: {}°", self.topocentric_azimuth)?;
-        writeln!(f, "Surface incidence angle I: {}°", self.surface_incidence)?;
         write!(f, "Equation of time E: {} min", self.equation_of_time)
     }
 }
@@ -654,7 +655,6 @@ mod tests {
             &reference_datetime(),
             REFERENCE_DELTA_T_SECONDS,
             reference_observer(),
-            reference_surface(),
         )
     }
 
@@ -680,6 +680,8 @@ mod tests {
 
         assert!((p.apparent_sun_longitude - 204.008_551_928_1).abs() < 1e-6);
 
+        // ν₀ and ν are not printed in Table A5.1; expected values are the
+        // NREL reference implementation's output (ν also equals H − σ + α).
         assert!((p.mean_sidereal_time - 318.515_578).abs() < 1e-4);
         assert!((p.apparent_sidereal_time - 318.511_910).abs() < 1e-4);
 
@@ -699,7 +701,7 @@ mod tests {
         assert!((p.astronomers_azimuth_signed - 14.340_24).abs() < 1e-4);
         assert!((p.topocentric_azimuth - 194.340_24).abs() < 1e-4);
 
-        assert!((p.surface_incidence - 25.187_00).abs() < 1e-4);
+        assert!((p.surface_incidence(reference_surface()) - 25.187_00).abs() < 1e-4);
 
         assert!((p.equation_of_time - 14.641_503).abs() < 1e-4);
     }
@@ -708,23 +710,19 @@ mod tests {
     #[allow(clippy::float_cmp)]
     fn compute_wires_intermediates_to_section_functions() {
         use crate::{
-            apparent, equation_of_time, horizontal, julian, nutation, obliquity, parallax,
+            apparent, equation_of_time, horizontal, incidence, julian, nutation, obliquity,
+            parallax,
         };
 
         let dt = reference_datetime();
         let observer = reference_observer();
-        let p = SolarPosition::compute_with_delta_t(
-            &dt,
-            REFERENCE_DELTA_T_SECONDS,
-            observer,
-            reference_surface(),
-        );
+        let p = SolarPosition::compute_with_delta_t(&dt, REFERENCE_DELTA_T_SECONDS, observer);
 
-        let jd = julian::calculate_julian_day(&dt);
-        let jde = julian::calculate_julian_ephemeris_day(jd, REFERENCE_DELTA_T_SECONDS);
-        let jc = julian::calculate_julian_century(jd);
-        let jce = julian::calculate_julian_ephemeris_century(jde);
-        let jme = julian::calculate_julian_ephemeris_millennium(jce);
+        let jd = julian::julian_day(&dt);
+        let jde = julian::julian_ephemeris_day(jd, REFERENCE_DELTA_T_SECONDS);
+        let jc = julian::julian_century(jd);
+        let jce = julian::julian_ephemeris_century(jde);
+        let jme = julian::julian_ephemeris_millennium(jce);
         assert_eq!(p.julian_ephemeris_day, jde);
         assert_eq!(p.julian_century, jc);
         assert_eq!(p.julian_ephemeris_century, jce);
@@ -780,6 +778,17 @@ mod tests {
         assert_eq!(
             p.astronomers_azimuth_signed,
             horizontal::astronomers_azimuth_signed(p.astronomers_azimuth),
+        );
+
+        let surface = reference_surface();
+        assert_eq!(
+            p.surface_incidence(surface),
+            incidence::surface_incidence_angle(
+                p.topocentric_zenith,
+                p.astronomers_azimuth,
+                surface.slope(),
+                surface.azimuth_rotation(),
+            ),
         );
 
         let m = equation_of_time::sun_mean_longitude(jme);

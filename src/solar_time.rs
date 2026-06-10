@@ -21,8 +21,7 @@ use crate::heliocentric::{
     earth_heliocentric_latitude, earth_heliocentric_longitude, earth_radius_vector,
 };
 use crate::julian::{
-    calculate_julian_day, calculate_julian_ephemeris_century, calculate_julian_ephemeris_day,
-    calculate_julian_ephemeris_millennium,
+    julian_day, julian_ephemeris_century, julian_ephemeris_day, julian_ephemeris_millennium,
 };
 use crate::nutation::nutation_in_longitude_and_obliquity;
 use crate::obliquity::true_obliquity_of_ecliptic;
@@ -270,18 +269,21 @@ impl<Tz: TimeZone> SolarDay<Tz> {
         let datetime_at_anchor = datetime.with_datetime(utc_anchor);
 
         // Step A.2.1: ν at the anchor.
-        let jd_0 = calculate_julian_day(&datetime_at_anchor);
-        let jde_0 = calculate_julian_ephemeris_day(jd_0, delta_t_seconds);
-        let jce_0 = calculate_julian_ephemeris_century(jde_0);
-        let jme_0 = calculate_julian_ephemeris_millennium(jce_0);
+        let jd_0 = julian_day(&datetime_at_anchor);
+        let jde_0 = julian_ephemeris_day(jd_0, delta_t_seconds);
+        let jce_0 = julian_ephemeris_century(jde_0);
+        let jme_0 = julian_ephemeris_millennium(jce_0);
         let (delta_psi_0, delta_epsilon_0) = nutation_in_longitude_and_obliquity(jce_0);
         let epsilon_0 = true_obliquity_of_ecliptic(jme_0, delta_epsilon_0);
         let nu = apparent_sidereal_time(mean_sidereal_time(jd_0), delta_psi_0, epsilon_0);
 
-        // Step A.2.2: (α, δ) on D₋₁, D₀, D₊₁ (TT).
-        let (alpha_minus, delta_minus) = right_ascension_and_declination(jde_0 - 1.0);
-        let (alpha_zero, delta_zero) = right_ascension_and_declination(jde_0);
-        let (alpha_plus, delta_plus) = right_ascension_and_declination(jde_0 + 1.0);
+        // Step A.2.2: (α, δ) at 0 TT on D₋₁, D₀, D₊₁. Midnight TT has
+        // JDE = jd_0 exactly (the reference implementation zeroes ΔT here),
+        // and ΔT enters once through `nᵢ` in equation A8; tabulating at
+        // `jde_0` would count it twice.
+        let (alpha_minus, delta_minus) = right_ascension_and_declination(jd_0 - 1.0);
+        let (alpha_zero, delta_zero) = right_ascension_and_declination(jd_0);
+        let (alpha_plus, delta_plus) = right_ascension_and_declination(jd_0 + 1.0);
 
         // Step A.2.3: m₀.
         let m_0 = approximate_sun_transit_time(alpha_zero, observer.longitude(), nu);
@@ -558,14 +560,14 @@ mod tests {
         let expected_transit = utc_midnight
             + chrono::TimeDelta::seconds(67_564)
             + chrono::TimeDelta::milliseconds(970);
-        assert!((day.transit - expected_transit).num_milliseconds().abs() < 1_000);
+        assert!((day.transit - expected_transit).num_milliseconds().abs() < 50);
 
         // Sunrise: 13:12:43.46 UT.
         let sunrise = day.sunrise.unwrap();
         let expected_sunrise = utc_midnight
             + chrono::TimeDelta::seconds(47_563)
             + chrono::TimeDelta::milliseconds(460);
-        assert!((sunrise - expected_sunrise).num_milliseconds().abs() < 1_000);
+        assert!((sunrise - expected_sunrise).num_milliseconds().abs() < 50);
 
         // Sunset: 00:20:19.19 UT on Oct 18.
         let sunset = day.sunset.unwrap();
@@ -573,7 +575,7 @@ mod tests {
             + chrono::TimeDelta::days(1)
             + chrono::TimeDelta::seconds(1_219)
             + chrono::TimeDelta::milliseconds(190);
-        assert!((sunset - expected_sunset).num_milliseconds().abs() < 1_000);
+        assert!((sunset - expected_sunset).num_milliseconds().abs() < 50);
     }
 
     #[test]
@@ -606,14 +608,14 @@ mod tests {
             (day.sunrise.unwrap() - expected_sunrise)
                 .num_milliseconds()
                 .abs()
-                < 1_000
+                < 100
         );
 
         let expected_transit = chrono_tz::Europe::Madrid
             .with_ymd_and_hms(2003, 10, 17, 20, 46, 4)
             .unwrap()
             + chrono::TimeDelta::milliseconds(970);
-        assert!((day.transit - expected_transit).num_milliseconds().abs() < 1_000);
+        assert!((day.transit - expected_transit).num_milliseconds().abs() < 100);
 
         let expected_sunset = chrono_tz::Europe::Madrid
             .with_ymd_and_hms(2003, 10, 18, 2, 20, 19)
@@ -623,7 +625,7 @@ mod tests {
             (day.sunset.unwrap() - expected_sunset)
                 .num_milliseconds()
                 .abs()
-                < 1_000
+                < 100
         );
     }
 
@@ -906,8 +908,8 @@ mod tests {
 
     #[test]
     fn right_ascension_and_declination_matches_table_a5_1() {
-        let jd = julian::calculate_julian_day(&reference_datetime());
-        let jde = julian::calculate_julian_ephemeris_day(jd, REFERENCE_DELTA_T_SECONDS);
+        let jd = julian::julian_day(&reference_datetime());
+        let jde = julian::julian_ephemeris_day(jd, REFERENCE_DELTA_T_SECONDS);
         let (alpha, delta) = right_ascension_and_declination(jde);
         assert!((alpha - 202.227_41).abs() < 1e-4);
         assert!((delta - -9.314_34).abs() < 1e-4);
@@ -918,10 +920,10 @@ mod tests {
     fn refined_event_fraction_dispatches_on_event_kind() {
         let observer = reference_observer();
         let utc_midnight = SpaDateTime::new(Utc.with_ymd_and_hms(2003, 10, 17, 0, 0, 0).unwrap());
-        let jd_0 = julian::calculate_julian_day(&utc_midnight);
-        let jde_0 = julian::calculate_julian_ephemeris_day(jd_0, REFERENCE_DELTA_T_SECONDS);
-        let jce_0 = julian::calculate_julian_ephemeris_century(jde_0);
-        let jme_0 = julian::calculate_julian_ephemeris_millennium(jce_0);
+        let jd_0 = julian::julian_day(&utc_midnight);
+        let jde_0 = julian::julian_ephemeris_day(jd_0, REFERENCE_DELTA_T_SECONDS);
+        let jce_0 = julian::julian_ephemeris_century(jde_0);
+        let jme_0 = julian::julian_ephemeris_millennium(jce_0);
         let (delta_psi_0, delta_epsilon_0) =
             crate::nutation::nutation_in_longitude_and_obliquity(jce_0);
         let epsilon_0 = crate::obliquity::true_obliquity_of_ecliptic(jme_0, delta_epsilon_0);
@@ -930,9 +932,9 @@ mod tests {
             delta_psi_0,
             epsilon_0,
         );
-        let (alpha_minus, delta_minus) = right_ascension_and_declination(jde_0 - 1.0);
-        let (alpha_zero, delta_zero) = right_ascension_and_declination(jde_0);
-        let (alpha_plus, delta_plus) = right_ascension_and_declination(jde_0 + 1.0);
+        let (alpha_minus, delta_minus) = right_ascension_and_declination(jd_0 - 1.0);
+        let (alpha_zero, delta_zero) = right_ascension_and_declination(jd_0);
+        let (alpha_plus, delta_plus) = right_ascension_and_declination(jd_0 + 1.0);
 
         let m_0 = approximate_sun_transit_time(alpha_zero, observer.longitude(), nu);
         let h_0 = sunrise_sunset_local_hour_angle(
