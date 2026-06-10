@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased](https://github.com/Kuenlun/helioxide/compare/v0.5.1...HEAD)
 
+## [0.6.0](https://github.com/Kuenlun/helioxide/compare/v0.5.1...v0.6.0) - 2026-06-10
+
+### Other
+
+- surface incidence as a SolarPosition readout ([#38](https://github.com/Kuenlun/helioxide/pull/38))
+
 ## [0.5.1](https://github.com/Kuenlun/helioxide/compare/v0.5.0...v0.5.1) - 2026-05-28
 
 Documentation-only release. No functional or API changes from 0.5.0.
