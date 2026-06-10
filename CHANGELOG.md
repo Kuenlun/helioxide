@@ -5,7 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased](https://github.com/Kuenlun/helioxide/compare/v0.5.1...HEAD)
+## [Unreleased](https://github.com/Kuenlun/helioxide/compare/v0.6.0...HEAD)
+
+## [0.6.0](https://github.com/Kuenlun/helioxide/compare/v0.5.1...v0.6.0) - 2026-06-10
+
+### Added
+
+- Add crate-level documentation by embedding the README, whose quick-start example (NREL reference case from appendix A.5) compiles and runs as a doctest, so the docs.rs landing page documents the crate instead of opening on a bare module list. ([#38](https://github.com/Kuenlun/helioxide/pull/38))
+
+### Changed
+
+- **BREAKING:** `SolarPosition::compute` and `SolarPosition::compute_with_delta_t` no longer take a `Surface`, and the `surface_incidence` field is gone from `SolarPosition` (with `Display` no longer printing it). The angle of incidence is now the `SolarPosition::surface_incidence(Surface) -> f64` method, a pure readout of the already-computed `(θ, Γ)` per equation 47, so one computed position serves any number of collector orientations without re-running the pipeline. ([#38](https://github.com/Kuenlun/helioxide/pull/38))
+- **BREAKING:** Drop the `calculate_` prefix from every `julian` module function, aligning with the noun-style naming used by the rest of the crate: `julian_day`, `calendar_date_from_julian_day`, `julian_ephemeris_day`, `julian_century`, `julian_ephemeris_century`, and `julian_ephemeris_millennium`. ([#38](https://github.com/Kuenlun/helioxide/pull/38))
+- Declare the minimum supported Rust version in `Cargo.toml` (`rust-version = "1.90"`, the const-stabilisation of the `f64` rounding methods used by `helper::int`), verified by building and testing on 1.90. ([#38](https://github.com/Kuenlun/helioxide/pull/38))
+
+### Fixed
+
+- Fix `SolarDay` double-counting `ΔT` in the sunrise/transit/sunset chain: step A.2.2 tabulates `(α, δ)` "at 0 TT", i.e. with the bare midnight JD as the TT epoch, but the three-day tabulation was anchored on `JDE = JD + ΔT/86400` while equation A8 added `ΔT/86400` again through `nᵢ`. The bias was ~0.1-0.25 s on every event (the NREL reference implementation zeroes `ΔT` for this step, `sun_rts.delta_t = 0`). The Table A5.1 assertions now pin transit, sunrise, and sunset to within 50 ms of the published `18:46:04.97 / 13:12:43.46 / 00:20:19.19 UT` instead of the previous 1 s slack that masked the offset. ([#38](https://github.com/Kuenlun/helioxide/pull/38))
 
 ## [0.5.1](https://github.com/Kuenlun/helioxide/compare/v0.5.0...v0.5.1) - 2026-05-28
 
