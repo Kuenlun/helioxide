@@ -2,6 +2,7 @@
 // helioxide - Rust implementation of NREL Solar Position Algorithm (SPA)
 // Copyright (c) 2026 Juan Luis Leal Contreras (Kuenlun)
 
+#![doc = include_str!("../README.md")]
 #![cfg_attr(all(test, coverage_nightly), feature(coverage_attribute))]
 
 pub mod apparent;

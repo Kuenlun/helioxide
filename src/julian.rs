@@ -21,7 +21,7 @@ const GREGORIAN_REFORM_Z: f64 = 2_299_161.0;
 
 /// Julian Day from `datetime`, with `UT = UTC + DUT1`. Equation 4.
 #[must_use]
-pub fn calculate_julian_day<Tz: TimeZone>(datetime: &SpaDateTime<Tz>) -> f64 {
+pub fn julian_day<Tz: TimeZone>(datetime: &SpaDateTime<Tz>) -> f64 {
     let dt = datetime.datetime().naive_utc();
 
     let seconds_of_minute =
@@ -55,7 +55,7 @@ pub fn calculate_julian_day<Tz: TimeZone>(datetime: &SpaDateTime<Tz>) -> f64 {
 /// Equations A15 to A23.
 #[must_use]
 #[allow(clippy::many_single_char_names, clippy::cast_possible_truncation)]
-pub fn calculate_calendar_date_from_julian_day(julian_day: f64, tz: Tz) -> Option<DateTime<Tz>> {
+pub fn calendar_date_from_julian_day(julian_day: f64, tz: Tz) -> Option<DateTime<Tz>> {
     let jd_plus_half = julian_day + 0.5;
     let z = int(jd_plus_half);
     let f = jd_plus_half - z;
@@ -95,25 +95,25 @@ pub fn calculate_calendar_date_from_julian_day(julian_day: f64, tz: Tz) -> Optio
 
 /// `JDE = JD + ΔT / 86_400`. Equation 5.
 #[must_use]
-pub const fn calculate_julian_ephemeris_day(julian_day: f64, delta_t: f64) -> f64 {
+pub const fn julian_ephemeris_day(julian_day: f64, delta_t: f64) -> f64 {
     julian_day + delta_t / 86_400.0
 }
 
 /// `JC = (JD − 2_451_545) / 36_525`. Equation 6.
 #[must_use]
-pub const fn calculate_julian_century(julian_day: f64) -> f64 {
+pub const fn julian_century(julian_day: f64) -> f64 {
     (julian_day - 2_451_545.0) / 36_525.0
 }
 
 /// `JCE = (JDE − 2_451_545) / 36_525`. Equation 7.
 #[must_use]
-pub const fn calculate_julian_ephemeris_century(julian_ephemeris_day: f64) -> f64 {
+pub const fn julian_ephemeris_century(julian_ephemeris_day: f64) -> f64 {
     (julian_ephemeris_day - 2_451_545.0) / 36_525.0
 }
 
 /// `JME = JCE / 10`. Equation 8.
 #[must_use]
-pub const fn calculate_julian_ephemeris_millennium(julian_ephemeris_century: f64) -> f64 {
+pub const fn julian_ephemeris_millennium(julian_ephemeris_century: f64) -> f64 {
     julian_ephemeris_century / 10.0
 }
 
@@ -156,7 +156,7 @@ mod tests {
     fn julian_day_matches_table_a4_1() {
         for &(y, m, d, h, min, s, expected) in &TABLE_A4_1 {
             let dt = build_datetime(chrono_tz::UTC, y, m, d, h, min, s);
-            let jd = calculate_julian_day(&SpaDateTime::new(dt));
+            let jd = julian_day(&SpaDateTime::new(dt));
             assert!(
                 (jd - expected).abs() < f64::EPSILON,
                 "JD for {dt}: got {jd}"
@@ -168,8 +168,7 @@ mod tests {
     fn calendar_date_round_trip_matches_table_a4_1() {
         for &(y, m, d, h, min, s, expected_jd) in &TABLE_A4_1 {
             let dt = build_datetime(chrono_tz::UTC, y, m, d, h, min, s);
-            let recovered =
-                calculate_calendar_date_from_julian_day(expected_jd, chrono_tz::UTC).unwrap();
+            let recovered = calendar_date_from_julian_day(expected_jd, chrono_tz::UTC).unwrap();
             assert!(
                 (recovered - dt).as_seconds_f64().abs() < f64::EPSILON,
                 "JD {expected_jd}: got {recovered}",
@@ -191,8 +190,8 @@ mod tests {
         );
         for local in local_dts {
             let utc = local.with_timezone(&chrono_tz::UTC);
-            let local_jd = calculate_julian_day(&SpaDateTime::new(local));
-            let utc_jd = calculate_julian_day(&SpaDateTime::new(utc));
+            let local_jd = julian_day(&SpaDateTime::new(local));
+            let utc_jd = julian_day(&SpaDateTime::new(utc));
             assert!((local_jd - utc_jd).abs() < f64::EPSILON);
         }
     }
@@ -201,23 +200,20 @@ mod tests {
     fn calendar_date_preserves_local_time_across_offsets() {
         for &(y, m, d, h, min, s) in &LOCAL_TIME_CASES {
             let local = build_datetime(chrono_tz::Europe::Madrid, y, m, d, h, min, s);
-            let jd = calculate_julian_day(&SpaDateTime::new(local));
-            let recovered =
-                calculate_calendar_date_from_julian_day(jd, chrono_tz::Europe::Madrid).unwrap();
+            let jd = julian_day(&SpaDateTime::new(local));
+            let recovered = calendar_date_from_julian_day(jd, chrono_tz::Europe::Madrid).unwrap();
             assert_eq!(recovered, local);
         }
     }
 
     #[test]
     fn calendar_date_picks_julian_or_gregorian_branch_at_2299161() {
-        let last_julian =
-            calculate_calendar_date_from_julian_day(2_299_159.5, chrono_tz::UTC).unwrap();
+        let last_julian = calendar_date_from_julian_day(2_299_159.5, chrono_tz::UTC).unwrap();
         assert_eq!(
             last_julian,
             build_datetime(chrono_tz::UTC, 1582, 10, 4, 0, 0, 0)
         );
-        let first_gregorian =
-            calculate_calendar_date_from_julian_day(2_299_160.5, chrono_tz::UTC).unwrap();
+        let first_gregorian = calendar_date_from_julian_day(2_299_160.5, chrono_tz::UTC).unwrap();
         assert_eq!(
             first_gregorian,
             build_datetime(chrono_tz::UTC, 1582, 10, 15, 0, 0, 0)
@@ -226,8 +222,7 @@ mod tests {
 
     #[test]
     fn calendar_date_handles_full_day_rounding_with_year_boundary_carry() {
-        let recovered =
-            calculate_calendar_date_from_julian_day(2_451_179.499_995, chrono_tz::UTC).unwrap();
+        let recovered = calendar_date_from_julian_day(2_451_179.499_995, chrono_tz::UTC).unwrap();
         assert_eq!(
             recovered,
             build_datetime(chrono_tz::UTC, 1999, 1, 1, 0, 0, 0)
@@ -236,16 +231,16 @@ mod tests {
 
     #[test]
     fn calendar_date_returns_none_for_julian_leap_day() {
-        assert!(calculate_calendar_date_from_julian_day(1_355_866.5, chrono_tz::UTC).is_none());
+        assert!(calendar_date_from_julian_day(1_355_866.5, chrono_tz::UTC).is_none());
     }
 
     #[test]
     fn julian_day_includes_dut1_correction() {
         let dt = build_datetime(chrono_tz::UTC, 2003, 10, 17, 19, 30, 30);
-        let jd_zero = calculate_julian_day(&SpaDateTime::new(dt));
+        let jd_zero = julian_day(&SpaDateTime::new(dt));
         for &dut1 in &[-0.5_f64, 0.5] {
             let with_dut1 = SpaDateTime::new(dt).try_with_dut1(dut1).unwrap();
-            let shift = calculate_julian_day(&with_dut1) - jd_zero;
+            let shift = julian_day(&with_dut1) - jd_zero;
             assert!((shift - dut1 / 86_400.0).abs() < 1e-9);
         }
     }
@@ -254,25 +249,24 @@ mod tests {
     fn julian_day_preserves_subsecond_precision() {
         let base = build_datetime(chrono_tz::UTC, 2003, 10, 17, 19, 30, 30);
         let with_nanos = base.with_nanosecond(250_000_000).unwrap();
-        let shift = calculate_julian_day(&SpaDateTime::new(with_nanos))
-            - calculate_julian_day(&SpaDateTime::new(base));
+        let shift = julian_day(&SpaDateTime::new(with_nanos)) - julian_day(&SpaDateTime::new(base));
         assert!((shift - 0.25 / 86_400.0).abs() < 1e-9);
     }
 
     #[test]
     fn julian_derived_quantities_pin_spa_constants() {
-        assert!(calculate_julian_century(2_451_545.0).abs() < f64::EPSILON);
-        assert!((calculate_julian_century(2_451_545.0 + 36_525.0) - 1.0).abs() < f64::EPSILON);
+        assert!(julian_century(2_451_545.0).abs() < f64::EPSILON);
+        assert!((julian_century(2_451_545.0 + 36_525.0) - 1.0).abs() < f64::EPSILON);
 
         let jd = 2_452_930.312_847;
-        assert!((calculate_julian_ephemeris_day(jd, 86_400.0) - jd - 1.0).abs() < f64::EPSILON);
+        assert!((julian_ephemeris_day(jd, 86_400.0) - jd - 1.0).abs() < f64::EPSILON);
 
-        let jde = calculate_julian_ephemeris_day(jd, 0.0);
-        let jc = calculate_julian_century(jd);
-        let jce = calculate_julian_ephemeris_century(jde);
+        let jde = julian_ephemeris_day(jd, 0.0);
+        let jc = julian_century(jd);
+        let jce = julian_ephemeris_century(jde);
         assert!((jc - jce).abs() < f64::EPSILON);
 
-        let jme = calculate_julian_ephemeris_millennium(jce);
+        let jme = julian_ephemeris_millennium(jce);
         assert!((jme * 10.0 - jce).abs() < f64::EPSILON);
     }
 }

@@ -17,8 +17,7 @@ use crate::horizontal::{
 };
 use crate::hour_angle::{observer_local_hour_angle, topocentric_local_hour_angle};
 use crate::julian::{
-    calculate_julian_day, calculate_julian_ephemeris_century, calculate_julian_ephemeris_day,
-    calculate_julian_ephemeris_millennium,
+    julian_day, julian_ephemeris_century, julian_ephemeris_day, julian_ephemeris_millennium,
 };
 use crate::nutation::nutation_in_longitude_and_obliquity;
 use crate::obliquity::true_obliquity_of_ecliptic;
@@ -32,18 +31,18 @@ use chrono::{TimeZone, Utc};
 /// trailing decimals.
 pub fn reference_jd() -> f64 {
     let utc = Utc.with_ymd_and_hms(2003, 10, 17, 19, 30, 30).unwrap();
-    calculate_julian_day(&SpaDateTime::new(utc))
+    julian_day(&SpaDateTime::new(utc))
 }
 
 /// JCE for Table A5.1 with ΔT = 67 s.
 pub fn reference_jce() -> f64 {
-    let jde = calculate_julian_ephemeris_day(reference_jd(), 67.0);
-    calculate_julian_ephemeris_century(jde)
+    let jde = julian_ephemeris_day(reference_jd(), 67.0);
+    julian_ephemeris_century(jde)
 }
 
 /// JME for Table A5.1.
 pub fn reference_jme() -> f64 {
-    calculate_julian_ephemeris_millennium(reference_jce())
+    julian_ephemeris_millennium(reference_jce())
 }
 
 /// Reference observer site from appendix A.5.
