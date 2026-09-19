@@ -31,7 +31,7 @@ high-precision solar calculations, faithful to Reda & Andreas,
   events back in the same timezone, handling DST gaps and overlaps.
 - **Valid by construction** — [`Observer`], [`Surface`] and [`SpaDateTime`]
   validate their domains at the boundary, so the numeric pipeline itself is
-  infallible. `#![forbid(unsafe_code)]`, no panics, 100% branch coverage.
+  infallible. Unsafe code is denied in `Cargo.toml`, with 100% branch coverage.
 
 [`SolarPosition`]: https://docs.rs/helioxide/latest/helioxide/spa/struct.SolarPosition.html
 [`SolarPosition::compute`]: https://docs.rs/helioxide/latest/helioxide/spa/struct.SolarPosition.html#method.compute
