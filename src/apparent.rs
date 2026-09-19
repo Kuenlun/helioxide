@@ -41,7 +41,7 @@ mod tests {
         let (delta_psi, _) = nutation_in_longitude_and_obliquity(reference_jce());
         let delta_tau = aberration_correction(earth_radius_vector(jme));
         let lambda = apparent_sun_longitude(theta, delta_psi, delta_tau);
-        assert!((lambda - 204.008_551_928_1).abs() < 1e-6);
+        assert!((lambda - 204.008_551_928_1).abs() < 1e-6_f64);
     }
 
     #[test]
@@ -53,9 +53,9 @@ mod tests {
     #[test]
     fn aberration_correction_is_inversely_proportional_to_r() {
         let dt_unit = aberration_correction(1.0);
-        for &r in &[0.5_f64, 0.95, 1.05, 2.0, 10.0] {
+        for &r in &[0.5_f64, 0.95_f64, 1.05_f64, 2.0_f64, 10.0_f64] {
             let dt = aberration_correction(r);
-            assert!(dt.mul_add(r, -dt_unit).abs() < 1e-15);
+            assert!(dt.mul_add(r, -dt_unit).abs() < 1e-15_f64);
         }
     }
 
@@ -63,11 +63,11 @@ mod tests {
     fn apparent_sun_longitude_shifts_linearly() {
         let delta_tau = aberration_correction(1.0);
         let baseline = apparent_sun_longitude(0.0, 0.0, delta_tau);
-        for &delta in &[-1.0_f64, -1e-3, 1e-6, 0.5] {
+        for &delta in &[-1.0_f64, -1e-3_f64, 1e-6_f64, 0.5_f64] {
             let shifted_theta = apparent_sun_longitude(delta, 0.0, delta_tau);
             let shifted_psi = apparent_sun_longitude(0.0, delta, delta_tau);
-            assert!((shifted_theta - baseline - delta).abs() < 1e-13);
-            assert!((shifted_psi - baseline - delta).abs() < 1e-13);
+            assert!((shifted_theta - baseline - delta).abs() < 1e-13_f64);
+            assert!((shifted_psi - baseline - delta).abs() < 1e-13_f64);
         }
     }
 }

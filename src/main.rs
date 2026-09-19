@@ -2,13 +2,20 @@
 // helioxide - Rust implementation of NREL Solar Position Algorithm (SPA)
 // Copyright (c) 2026 Juan Luis Leal Contreras (Kuenlun)
 
+//! Print the current solar position and daily events for the example observer.
+
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use chrono::Utc;
 use chrono_tz::Tz;
 use helioxide::{Observer, SolarDay, SolarPosition, SpaDateTime, Surface};
+use thiserror as _;
 
 #[cfg_attr(coverage_nightly, coverage(off))]
+#[expect(
+    clippy::print_stdout,
+    reason = "This example owns the CLI output stream."
+)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let observer = Observer::try_new(38.346_02, -0.490_68, 3.0, 1015.0, 18.0)?;
     let surface = Surface::try_new(observer.latitude(), 0.0)?;

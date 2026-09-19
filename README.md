@@ -77,6 +77,15 @@ lives in its own module as a documented free function keyed to the paper's
 equation numbers, so partial computations and cross-checks against the
 report are straightforward.
 
+## Development
+
+Install the same Lockpick revision used by CI, then run the quality checks:
+
+```sh
+cargo install --git https://github.com/Kuenlun/lockpick --rev 87116062372b37c5a793acb10d662343096c8985 --locked lockpick
+lockpick
+```
+
 ## License
 
 Licensed under either of

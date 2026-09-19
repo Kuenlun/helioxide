@@ -2,6 +2,11 @@
 // helioxide - Rust implementation of NREL Solar Position Algorithm (SPA)
 // Copyright (c) 2026 Juan Luis Leal Contreras (Kuenlun)
 
+//! Verify the example executable's solar report.
+
+// Cargo also supplies the dependencies used only by the executable.
+use {chrono as _, chrono_tz as _, helioxide as _, thiserror as _};
+
 use std::process::Command;
 
 #[test]

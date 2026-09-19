@@ -22,7 +22,7 @@ pub const fn int(x: f64) -> f64 {
 #[must_use]
 pub const fn limit_degrees(degrees: f64) -> f64 {
     // Hand-rolled `rem_euclid` because the stdlib one is not yet `const`.
-    let r = degrees % 360.0;
+    let r = degrees % 360.0_f64;
     if r < 0.0 { r + 360.0 } else { r }
 }
 
@@ -32,30 +32,39 @@ mod tests {
     use super::*;
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn int_truncates_towards_zero() {
-        assert_eq!(int(8.7), 8.0);
-        assert_eq!(int(8.2), 8.0);
-        assert_eq!(int(-8.7), -8.0);
-        assert_eq!(int(-8.2), -8.0);
-        assert_eq!(int(0.0), 0.0);
+        assert_eq!(int(8.7), 8.0_f64);
+        assert_eq!(int(8.2), 8.0_f64);
+        assert_eq!(int(-8.7), -8.0_f64);
+        assert_eq!(int(-8.2), -8.0_f64);
+        assert_eq!(int(0.0), 0.0_f64);
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn limit_degrees_inside_range_is_identity() {
-        assert_eq!(limit_degrees(0.0), 0.0);
-        assert_eq!(limit_degrees(45.0), 45.0);
-        assert_eq!(limit_degrees(360.0), 0.0);
+        assert_eq!(limit_degrees(0.0), 0.0_f64);
+        assert_eq!(limit_degrees(45.0), 45.0_f64);
+        assert_eq!(limit_degrees(360.0), 0.0_f64);
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn limit_degrees_wraps() {
-        assert_eq!(limit_degrees(370.0), 10.0);
-        assert_eq!(limit_degrees(720.0), 0.0);
-        assert_eq!(limit_degrees(-30.0), 330.0);
-        assert_eq!(limit_degrees(-720.0), 0.0);
-        assert_eq!(limit_degrees(-721.0), 359.0);
+        assert_eq!(limit_degrees(370.0), 10.0_f64);
+        assert_eq!(limit_degrees(720.0), 0.0_f64);
+        assert_eq!(limit_degrees(-30.0), 330.0_f64);
+        assert_eq!(limit_degrees(-720.0), 0.0_f64);
+        assert_eq!(limit_degrees(-721.0), 359.0_f64);
     }
 }

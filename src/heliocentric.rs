@@ -45,10 +45,10 @@ fn evaluate_periodic_series(subseries: &[&[[f64; 3]]], jme: f64) -> f64 {
 }
 
 // Table A4.2, verbatim. Clippy's literal-style lints would alter the digits.
-#[allow(
+#[expect(
     clippy::unreadable_literal,
     clippy::approx_constant,
-    clippy::excessive_precision
+    reason = "Preserve the published SPA table coefficients and their printed precision."
 )]
 mod tables {
     const L0: &[[f64; 3]] = &[
@@ -292,7 +292,10 @@ mod tests {
     };
     use crate::test_fixtures::reference_jme;
 
-    #[allow(clippy::excessive_precision)]
+    #[expect(
+        clippy::excessive_precision,
+        reason = "Preserve the published SPA table coefficients and their printed precision."
+    )]
     const A5_1_L_SUBSERIES: [f64; 6] = [
         172_067_561.526_586,
         628_332_010_650.051_147,
@@ -323,10 +326,10 @@ mod tests {
     #[test]
     fn l_subseries_match_table_a5_1() {
         let jme = reference_jme();
-        for (k, expected) in A5_1_L_SUBSERIES.iter().enumerate() {
+        for (k, (terms, expected)) in L_TERMS.iter().zip(A5_1_L_SUBSERIES).enumerate() {
             assert_close(
-                periodic_subseries_sum(L_TERMS[k], jme),
-                *expected,
+                periodic_subseries_sum(terms, jme),
+                expected,
                 &format!("L{k}"),
             );
         }
@@ -335,10 +338,10 @@ mod tests {
     #[test]
     fn b_subseries_match_table_a5_1() {
         let jme = reference_jme();
-        for (k, expected) in A5_1_B_SUBSERIES.iter().enumerate() {
+        for (k, (terms, expected)) in B_TERMS.iter().zip(A5_1_B_SUBSERIES).enumerate() {
             assert_close(
-                periodic_subseries_sum(B_TERMS[k], jme),
-                *expected,
+                periodic_subseries_sum(terms, jme),
+                expected,
                 &format!("B{k}"),
             );
         }
@@ -347,10 +350,10 @@ mod tests {
     #[test]
     fn r_subseries_match_table_a5_1() {
         let jme = reference_jme();
-        for (k, expected) in A5_1_R_SUBSERIES.iter().enumerate() {
+        for (k, (terms, expected)) in R_TERMS.iter().zip(A5_1_R_SUBSERIES).enumerate() {
             assert_close(
-                periodic_subseries_sum(R_TERMS[k], jme),
-                *expected,
+                periodic_subseries_sum(terms, jme),
+                expected,
                 &format!("R{k}"),
             );
         }
@@ -359,27 +362,34 @@ mod tests {
     #[test]
     fn earth_heliocentric_longitude_matches_table_a5_1() {
         let l = earth_heliocentric_longitude(reference_jme());
-        assert!((l - 24.018_261_691_7).abs() < 1e-6);
+        assert!((l - 24.018_261_691_7).abs() < 1e-6_f64);
     }
 
     #[test]
     fn earth_heliocentric_latitude_matches_table_a5_1() {
         let b = earth_heliocentric_latitude(reference_jme());
-        assert!((b - -0.000_101_121_9).abs() < 1e-9);
+        assert!((b - -0.000_101_121_9).abs() < 1e-9_f64);
     }
 
     #[test]
     fn earth_radius_vector_matches_table_a5_1() {
         let r = earth_radius_vector(reference_jme());
-        assert!((r - 0.996_542_297_4).abs() < 1e-9);
+        assert!((r - 0.996_542_297_4).abs() < 1e-9_f64);
     }
 
     #[test]
     fn earth_heliocentric_longitude_is_wrapped_into_zero_360() {
-        for &jme in &[-2.0, -0.5, 0.0, 0.5, 1.5, reference_jme()] {
+        for &jme in &[
+            -2.0_f64,
+            -0.5_f64,
+            0.0_f64,
+            0.5_f64,
+            1.5_f64,
+            reference_jme(),
+        ] {
             let l = earth_heliocentric_longitude(jme);
             assert!(
-                (0.0..360.0).contains(&l),
+                (0.0_f64..360.0_f64).contains(&l),
                 "L escaped [0, 360) at JME={jme}: {l}"
             );
         }
@@ -387,14 +397,14 @@ mod tests {
 
     #[test]
     fn earth_heliocentric_latitude_is_signed() {
-        assert!(earth_heliocentric_latitude(reference_jme()) < 0.0);
+        assert!(earth_heliocentric_latitude(reference_jme()) < 0.0_f64);
     }
 
     #[test]
     fn earth_radius_vector_is_positive_across_validity_window() {
-        for &jme in &[-4.0, -1.0, 0.0, 1.0, 4.0] {
+        for &jme in &[-4.0_f64, -1.0_f64, 0.0_f64, 1.0_f64, 4.0_f64] {
             let r = earth_radius_vector(jme);
-            assert!(r.is_finite() && r > 0.0);
+            assert!(r.is_finite() && r > 0.0_f64);
         }
     }
 

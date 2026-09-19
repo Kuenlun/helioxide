@@ -62,16 +62,16 @@ impl Observer {
         pressure: f64,
         temperature: f64,
     ) -> Result<Self, ObserverError> {
-        if !latitude.is_finite() || !(-90.0..=90.0).contains(&latitude) {
+        if !latitude.is_finite() || !(-90.0_f64..=90.0_f64).contains(&latitude) {
             return Err(ObserverError::InvalidLatitude(latitude));
         }
-        if !longitude.is_finite() || !(-180.0..=180.0).contains(&longitude) {
+        if !longitude.is_finite() || !(-180.0_f64..=180.0_f64).contains(&longitude) {
             return Err(ObserverError::InvalidLongitude(longitude));
         }
         if !elevation.is_finite() {
             return Err(ObserverError::InvalidElevation(elevation));
         }
-        if !pressure.is_finite() || pressure <= 0.0 {
+        if !pressure.is_finite() || pressure <= 0.0_f64 {
             return Err(ObserverError::InvalidPressure(pressure));
         }
         if !temperature.is_finite() || temperature <= Self::TEMPERATURE_FLOOR_CELSIUS_EXCLUSIVE {
@@ -121,30 +121,35 @@ impl Observer {
         )
     }
 
+    /// Latitude in degrees, positive north.
     #[inline]
     #[must_use]
     pub const fn latitude(&self) -> f64 {
         self.latitude
     }
 
+    /// Longitude in degrees, positive east.
     #[inline]
     #[must_use]
     pub const fn longitude(&self) -> f64 {
         self.longitude
     }
 
+    /// Elevation above sea level in metres.
     #[inline]
     #[must_use]
     pub const fn elevation(&self) -> f64 {
         self.elevation
     }
 
+    /// Atmospheric pressure in millibars.
     #[inline]
     #[must_use]
     pub const fn pressure(&self) -> f64 {
         self.pressure
     }
 
+    /// Air temperature in degrees Celsius.
     #[inline]
     #[must_use]
     pub const fn temperature(&self) -> f64 {
@@ -152,16 +157,22 @@ impl Observer {
     }
 }
 
+/// Invalid geographic or atmospheric observer input.
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum ObserverError {
+    /// Latitude is non-finite or outside [-90, 90] degrees.
     #[error("latitude {0}° must lie in [-90°, 90°] and be finite")]
     InvalidLatitude(f64),
+    /// Longitude is non-finite or outside [-180, 180] degrees.
     #[error("longitude {0}° must lie in [-180°, 180°] and be finite")]
     InvalidLongitude(f64),
+    /// Elevation is non-finite.
     #[error("elevation {0} m must be finite")]
     InvalidElevation(f64),
+    /// Pressure is non-finite or not strictly positive.
     #[error("pressure {0} mbar must be > 0 mbar and finite")]
     InvalidPressure(f64),
+    /// Temperature is non-finite or at or below -273 degrees Celsius.
     #[error(
         "temperature {0} °C must be > -273 °C and finite \
          (equation 42's denominator 273 + T vanishes at -273 °C)"
@@ -185,10 +196,10 @@ impl Surface {
     /// and finite.
     #[inline]
     pub fn try_new(slope: f64, azimuth_rotation: f64) -> Result<Self, SurfaceError> {
-        if !slope.is_finite() || !(0.0..=180.0).contains(&slope) {
+        if !slope.is_finite() || !(0.0_f64..=180.0_f64).contains(&slope) {
             return Err(SurfaceError::InvalidSlope(slope));
         }
-        if !azimuth_rotation.is_finite() || !(-180.0..=180.0).contains(&azimuth_rotation) {
+        if !azimuth_rotation.is_finite() || !(-180.0_f64..=180.0_f64).contains(&azimuth_rotation) {
             return Err(SurfaceError::InvalidAzimuthRotation(azimuth_rotation));
         }
         Ok(Self {
@@ -207,12 +218,14 @@ impl Surface {
         }
     }
 
+    /// Surface tilt in degrees from the horizontal plane.
     #[inline]
     #[must_use]
     pub const fn slope(&self) -> f64 {
         self.slope
     }
 
+    /// Surface orientation in degrees westward from south.
     #[inline]
     #[must_use]
     pub const fn azimuth_rotation(&self) -> f64 {
@@ -227,10 +240,13 @@ impl Default for Surface {
     }
 }
 
+/// Invalid collector orientation.
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum SurfaceError {
+    /// Slope is non-finite or outside [0, 180] degrees.
     #[error("slope {0}° must lie in [0°, 180°] and be finite")]
     InvalidSlope(f64),
+    /// Azimuth rotation is non-finite or outside [-180, 180] degrees.
     #[error("azimuth rotation {0}° must lie in [-180°, 180°] and be finite")]
     InvalidAzimuthRotation(f64),
 }
@@ -238,60 +254,97 @@ pub enum SurfaceError {
 /// Full output of the SPA pipeline. Fields are ordered by paper section.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SolarPosition {
+    /// Julian day in UT1.
     pub julian_day: f64,
+    /// Julian ephemeris day in terrestrial time.
     pub julian_ephemeris_day: f64,
+    /// Julian centuries in UT1 since J2000.
     pub julian_century: f64,
+    /// Julian centuries in terrestrial time since J2000.
     pub julian_ephemeris_century: f64,
+    /// Julian millennia in terrestrial time since J2000.
     pub julian_ephemeris_millennium: f64,
 
+    /// Earth heliocentric longitude in degrees, wrapped to [0, 360).
     pub earth_heliocentric_longitude: f64,
+    /// Earth heliocentric latitude in degrees.
     pub earth_heliocentric_latitude: f64,
+    /// Earth-Sun distance in astronomical units.
     pub earth_radius_vector: f64,
 
+    /// Sun geocentric longitude in degrees, wrapped to [0, 360).
     pub geocentric_longitude: f64,
+    /// Sun geocentric latitude in degrees.
     pub geocentric_latitude: f64,
 
     /// `X₀..X₄` (degrees, raw). Equations 15 to 19.
     pub mean_elongation_moon_sun: f64,
+    /// Sun mean anomaly in degrees (X1, equation 16).
     pub mean_anomaly_sun: f64,
+    /// Moon mean anomaly in degrees (X2, equation 17).
     pub mean_anomaly_moon: f64,
+    /// Moon argument of latitude in degrees (X3, equation 18).
     pub argument_latitude_moon: f64,
+    /// Moon ascending node longitude in degrees (X4, equation 19).
     pub ascending_longitude_moon: f64,
 
+    /// Nutation correction to longitude in degrees.
     pub nutation_in_longitude: f64,
+    /// Nutation correction to obliquity in degrees.
     pub nutation_in_obliquity: f64,
 
     /// `ε₀` (arc seconds). Equation 24.
     pub mean_obliquity_arcseconds: f64,
+    /// True obliquity of the ecliptic in degrees.
     pub true_obliquity: f64,
 
+    /// Aberration correction in degrees.
     pub aberration_correction: f64,
+    /// Apparent Sun longitude in degrees.
     pub apparent_sun_longitude: f64,
 
+    /// Mean Greenwich sidereal time in degrees.
     pub mean_sidereal_time: f64,
+    /// Apparent Greenwich sidereal time in degrees.
     pub apparent_sidereal_time: f64,
 
+    /// Geocentric right ascension in degrees, wrapped to [0, 360).
     pub geocentric_right_ascension: f64,
+    /// Geocentric declination in degrees.
     pub geocentric_declination: f64,
 
+    /// Observer local hour angle in degrees, wrapped to [0, 360).
     pub observer_local_hour_angle: f64,
 
+    /// Equatorial horizontal parallax in degrees.
     pub equatorial_horizontal_parallax: f64,
+    /// Parallax correction to right ascension in degrees.
     pub parallax_in_right_ascension: f64,
+    /// Topocentric right ascension in degrees.
     pub topocentric_right_ascension: f64,
+    /// Topocentric declination in degrees.
     pub topocentric_declination: f64,
 
+    /// Topocentric local hour angle in degrees.
     pub topocentric_local_hour_angle: f64,
 
+    /// Topocentric elevation before atmospheric refraction, in degrees.
     pub topocentric_elevation_unrefracted: f64,
+    /// Atmospheric refraction correction in degrees.
     pub atmospheric_refraction: f64,
+    /// Topocentric elevation after atmospheric refraction, in degrees.
     pub topocentric_elevation_corrected: f64,
+    /// Topocentric zenith angle in degrees.
     pub topocentric_zenith: f64,
 
+    /// Astronomical azimuth in degrees westward from south, in [0, 360).
     pub astronomers_azimuth: f64,
+    /// Astronomical azimuth in degrees westward from south, in [-180, 180).
     pub astronomers_azimuth_signed: f64,
+    /// Navigational azimuth in degrees eastward from north, in [0, 360).
     pub topocentric_azimuth: f64,
 
+    /// Equation of time in minutes.
     pub equation_of_time: f64,
 }
 
@@ -315,7 +368,10 @@ impl SolarPosition {
     /// IERS bulletin value; otherwise [`Self::compute`] picks the best
     /// available `ΔT` automatically.
     #[must_use]
-    #[allow(clippy::many_single_char_names, clippy::similar_names)]
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "Keep the parameter names and grouping used by the SPA equations."
+    )]
     pub fn compute_with_delta_t<Tz: TimeZone>(
         datetime: &SpaDateTime<Tz>,
         delta_t: f64,
@@ -338,7 +394,7 @@ impl SolarPosition {
         let (delta_psi, delta_epsilon) = nutation::nutation_in_longitude_and_obliquity(jce);
         // Evaluate equation 24 once and apply equation 25 inline.
         let epsilon0_arcseconds = obliquity::mean_obliquity_of_ecliptic_arcseconds(jme);
-        let epsilon = epsilon0_arcseconds / 3600.0 + delta_epsilon;
+        let epsilon = epsilon0_arcseconds / 3_600.0_f64 + delta_epsilon;
 
         let delta_tau = apparent::aberration_correction(r);
         let lambda = apparent::apparent_sun_longitude(theta, delta_psi, delta_tau);
@@ -443,7 +499,10 @@ impl SolarPosition {
 }
 
 impl fmt::Display for SolarPosition {
-    #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep the SPA fields in paper order within one report formatter."
+    )]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Julian Day: {}", self.julian_day)?;
         writeln!(f, "Julian Ephemeris Day: {}", self.julian_ephemeris_day)?;
@@ -662,52 +721,55 @@ mod tests {
     fn compute_matches_table_a5_1() {
         let p = reference_position();
 
-        assert!((p.julian_day - 2_452_930.312_847).abs() < 1e-6);
+        assert!((p.julian_day - 2_452_930.312_847).abs() < 1e-6_f64);
 
-        assert!((p.earth_heliocentric_longitude - 24.018_261_691_7).abs() < 1e-6);
-        assert!((p.earth_heliocentric_latitude - -0.000_101_121_9).abs() < 1e-9);
-        assert!((p.earth_radius_vector - 0.996_542_297_4).abs() < 1e-9);
+        assert!((p.earth_heliocentric_longitude - 24.018_261_691_7).abs() < 1e-6_f64);
+        assert!((p.earth_heliocentric_latitude - -0.000_101_121_9).abs() < 1e-9_f64);
+        assert!((p.earth_radius_vector - 0.996_542_297_4).abs() < 1e-9_f64);
 
-        assert!((p.geocentric_longitude - 204.018_261_691_7).abs() < 1e-6);
-        assert!((p.geocentric_latitude - 0.000_101_121_9).abs() < 1e-9);
+        assert!((p.geocentric_longitude - 204.018_261_691_7).abs() < 1e-6_f64);
+        assert!((p.geocentric_latitude - 0.000_101_121_9).abs() < 1e-9_f64);
 
-        assert!((p.nutation_in_longitude - -0.003_998_40).abs() < 1e-8);
-        assert!((p.nutation_in_obliquity - 0.001_666_57).abs() < 1e-8);
+        assert!((p.nutation_in_longitude - -0.003_998_40).abs() < 1e-8_f64);
+        assert!((p.nutation_in_obliquity - 0.001_666_57).abs() < 1e-8_f64);
 
-        let epsilon0_round_trip = (23.440_465_f64 - 0.001_666_57) * 3600.0;
-        assert!((p.mean_obliquity_arcseconds - epsilon0_round_trip).abs() < 0.1);
-        assert!((p.true_obliquity - 23.440_465).abs() < 1e-6);
+        let epsilon0_round_trip = (23.440_465_f64 - 0.001_666_57_f64) * 3_600.0_f64;
+        assert!((p.mean_obliquity_arcseconds - epsilon0_round_trip).abs() < 0.1_f64);
+        assert!((p.true_obliquity - 23.440_465).abs() < 1e-6_f64);
 
-        assert!((p.apparent_sun_longitude - 204.008_551_928_1).abs() < 1e-6);
+        assert!((p.apparent_sun_longitude - 204.008_551_928_1).abs() < 1e-6_f64);
 
         // ν₀ and ν are not printed in Table A5.1; expected values are the
         // NREL reference implementation's output (ν also equals H − σ + α).
-        assert!((p.mean_sidereal_time - 318.515_578).abs() < 1e-4);
-        assert!((p.apparent_sidereal_time - 318.511_910).abs() < 1e-4);
+        assert!((p.mean_sidereal_time - 318.515_578).abs() < 1e-4_f64);
+        assert!((p.apparent_sidereal_time - 318.511_910).abs() < 1e-4_f64);
 
-        assert!((p.geocentric_right_ascension - 202.227_41).abs() < 1e-4);
-        assert!((p.geocentric_declination - -9.314_34).abs() < 1e-4);
+        assert!((p.geocentric_right_ascension - 202.227_41).abs() < 1e-4_f64);
+        assert!((p.geocentric_declination - -9.314_34).abs() < 1e-4_f64);
 
-        assert!((p.observer_local_hour_angle - 11.105_900).abs() < 1e-4);
+        assert!((p.observer_local_hour_angle - 11.105_900).abs() < 1e-4_f64);
 
-        assert!((p.topocentric_right_ascension - 202.227_04).abs() < 1e-4);
-        assert!((p.topocentric_declination - -9.316_179).abs() < 1e-4);
+        assert!((p.topocentric_right_ascension - 202.227_04).abs() < 1e-4_f64);
+        assert!((p.topocentric_declination - -9.316_179).abs() < 1e-4_f64);
 
-        assert!((p.topocentric_local_hour_angle - 11.106_29).abs() < 1e-4);
+        assert!((p.topocentric_local_hour_angle - 11.106_29).abs() < 1e-4_f64);
 
-        assert!((p.topocentric_zenith - 50.111_62).abs() < 1e-4);
-        assert!((p.topocentric_elevation_corrected - (90.0_f64 - 50.111_62)).abs() < 1e-4);
-        assert!((p.astronomers_azimuth - 14.340_24).abs() < 1e-4);
-        assert!((p.astronomers_azimuth_signed - 14.340_24).abs() < 1e-4);
-        assert!((p.topocentric_azimuth - 194.340_24).abs() < 1e-4);
+        assert!((p.topocentric_zenith - 50.111_62).abs() < 1e-4_f64);
+        assert!((p.topocentric_elevation_corrected - (90.0_f64 - 50.111_62)).abs() < 1e-4_f64);
+        assert!((p.astronomers_azimuth - 14.340_24).abs() < 1e-4_f64);
+        assert!((p.astronomers_azimuth_signed - 14.340_24).abs() < 1e-4_f64);
+        assert!((p.topocentric_azimuth - 194.340_24).abs() < 1e-4_f64);
 
-        assert!((p.surface_incidence(reference_surface()) - 25.187_00).abs() < 1e-4);
+        assert!((p.surface_incidence(reference_surface()) - 25.187_00).abs() < 1e-4_f64);
 
-        assert!((p.equation_of_time - 14.641_503).abs() < 1e-4);
+        assert!((p.equation_of_time - 14.641_503).abs() < 1e-4_f64);
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn compute_wires_intermediates_to_section_functions() {
         use crate::{
             apparent, equation_of_time, horizontal, incidence, julian, nutation, obliquity,
@@ -813,7 +875,7 @@ mod tests {
                 self.remaining = 0;
                 Err(fmt::Error)
             } else {
-                self.remaining -= s.len();
+                self.remaining = self.remaining.saturating_sub(s.len());
                 Ok(())
             }
         }
@@ -833,41 +895,50 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn observer_constants_match_published_references() {
         assert_eq!(
             Observer::REFERENCE_PRESSURE_MILLIBARS,
             crate::horizontal::STANDARD_PRESSURE_MILLIBARS,
         );
-        assert_eq!(Observer::REFERENCE_PRESSURE_MILLIBARS, 1010.0);
+        assert_eq!(Observer::REFERENCE_PRESSURE_MILLIBARS, 1_010.0_f64);
         assert_eq!(
             Observer::REFERENCE_TEMPERATURE_CELSIUS,
             crate::horizontal::REFERENCE_TEMPERATURE_KELVIN
                 - crate::horizontal::KELVIN_OFFSET_FROM_CELSIUS,
         );
-        assert_eq!(Observer::REFERENCE_TEMPERATURE_CELSIUS, 10.0);
-        assert_eq!(Observer::ISA_PRESSURE_MILLIBARS, 1013.25);
-        assert_eq!(Observer::ISA_TEMPERATURE_CELSIUS, 15.0);
+        assert_eq!(Observer::REFERENCE_TEMPERATURE_CELSIUS, 10.0_f64);
+        assert_eq!(Observer::ISA_PRESSURE_MILLIBARS, 1_013.25_f64);
+        assert_eq!(Observer::ISA_TEMPERATURE_CELSIUS, 15.0_f64);
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn observer_try_with_reference_atmosphere_uses_paper_constants() {
         let obs = Observer::try_with_reference_atmosphere(38.346_02, -0.490_68, 3.0).unwrap();
-        assert_eq!(obs.latitude(), 38.346_02);
-        assert_eq!(obs.longitude(), -0.490_68);
-        assert_eq!(obs.elevation(), 3.0);
+        assert_eq!(obs.latitude(), 38.346_02_f64);
+        assert_eq!(obs.longitude(), -0.490_68_f64);
+        assert_eq!(obs.elevation(), 3.0_f64);
         assert_eq!(obs.pressure(), Observer::REFERENCE_PRESSURE_MILLIBARS);
         assert_eq!(obs.temperature(), Observer::REFERENCE_TEMPERATURE_CELSIUS);
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn observer_try_at_sea_level_isa_uses_isa_constants() {
         let obs = Observer::try_at_sea_level_isa(40.0, -3.0).unwrap();
-        assert_eq!(obs.latitude(), 40.0);
-        assert_eq!(obs.longitude(), -3.0);
-        assert_eq!(obs.elevation(), 0.0);
+        assert_eq!(obs.latitude(), 40.0_f64);
+        assert_eq!(obs.longitude(), -3.0_f64);
+        assert_eq!(obs.elevation(), 0.0_f64);
         assert_eq!(obs.pressure(), Observer::ISA_PRESSURE_MILLIBARS);
         assert_eq!(obs.temperature(), Observer::ISA_TEMPERATURE_CELSIUS);
     }
@@ -875,40 +946,46 @@ mod tests {
     #[test]
     fn reference_atmosphere_collapses_equation_42_to_saemundsson() {
         let obs = Observer::try_with_reference_atmosphere(0.0, 0.0, 0.0).unwrap();
-        for &e0 in &[0.0_f64, 10.0, 45.0, 89.0] {
+        for &e0 in &[0.0_f64, 10.0_f64, 45.0_f64, 89.0_f64] {
             let actual =
                 crate::horizontal::atmospheric_refraction(e0, obs.pressure(), obs.temperature());
-            let aux = e0 + 10.3 / (e0 + 5.11);
-            let expected = 1.02 / (60.0 * aux.to_radians().tan());
-            assert!((actual - expected).abs() < 1e-15);
+            let aux = e0 + 10.3_f64 / (e0 + 5.11_f64);
+            let expected = 1.02_f64 / (60.0_f64 * aux.to_radians().tan());
+            assert!((actual - expected).abs() < 1e-15_f64);
         }
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn observer_temperature_floor_matches_equation_42_offset() {
         assert_eq!(
             Observer::TEMPERATURE_FLOOR_CELSIUS_EXCLUSIVE,
             -crate::horizontal::KELVIN_OFFSET_FROM_CELSIUS,
         );
-        assert_eq!(Observer::TEMPERATURE_FLOOR_CELSIUS_EXCLUSIVE, -273.0);
+        assert_eq!(Observer::TEMPERATURE_FLOOR_CELSIUS_EXCLUSIVE, -273.0_f64);
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn observer_try_new_round_trips_through_accessors() {
         let obs = Observer::try_new(39.742_476, -105.1786, 1830.14, 820.0, 11.0).unwrap();
-        assert_eq!(obs.latitude(), 39.742_476);
-        assert_eq!(obs.longitude(), -105.1786);
-        assert_eq!(obs.elevation(), 1830.14);
-        assert_eq!(obs.pressure(), 820.0);
-        assert_eq!(obs.temperature(), 11.0);
+        assert_eq!(obs.latitude(), 39.742_476_f64);
+        assert_eq!(obs.longitude(), -105.178_6_f64);
+        assert_eq!(obs.elevation(), 1_830.14_f64);
+        assert_eq!(obs.pressure(), 820.0_f64);
+        assert_eq!(obs.temperature(), 11.0_f64);
     }
 
     #[test]
     fn observer_accepts_inclusive_bounds() {
-        for &lat in &[-90.0_f64, 90.0] {
-            for &lon in &[-180.0_f64, 180.0] {
+        for &lat in &[-90.0_f64, 90.0_f64] {
+            for &lon in &[-180.0_f64, 180.0_f64] {
                 assert!(Observer::try_new(lat, lon, 0.0, 1013.25, 15.0).is_ok());
             }
         }
@@ -920,9 +997,9 @@ mod tests {
             f64::NAN,
             f64::INFINITY,
             f64::NEG_INFINITY,
-            90.000_001,
-            -90.000_001,
-            180.0,
+            90.000_001_f64,
+            -90.000_001_f64,
+            180.0_f64,
         ] {
             assert!(matches!(
                 Observer::try_new(bad, 0.0, 0.0, 1013.25, 15.0),
@@ -937,9 +1014,9 @@ mod tests {
             f64::NAN,
             f64::INFINITY,
             f64::NEG_INFINITY,
-            180.000_001,
-            -180.000_001,
-            360.0,
+            180.000_001_f64,
+            -180.000_001_f64,
+            360.0_f64,
         ] {
             assert!(matches!(
                 Observer::try_new(0.0, bad, 0.0, 1013.25, 15.0),
@@ -964,9 +1041,9 @@ mod tests {
             f64::NAN,
             f64::INFINITY,
             f64::NEG_INFINITY,
-            0.0,
-            -1.0,
-            -1013.25,
+            0.0_f64,
+            -1.0_f64,
+            -1_013.25_f64,
         ] {
             assert!(matches!(
                 Observer::try_new(0.0, 0.0, 0.0, bad, 15.0),
@@ -981,9 +1058,9 @@ mod tests {
             f64::NAN,
             f64::INFINITY,
             f64::NEG_INFINITY,
-            -273.0,
-            -273.000_001,
-            -1e6,
+            -273.0_f64,
+            -273.000_001_f64,
+            -1e6_f64,
         ] {
             assert!(matches!(
                 Observer::try_new(0.0, 0.0, 0.0, 1013.25, bad),
@@ -1034,17 +1111,20 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn surface_try_new_round_trips_through_accessors() {
         let surface = Surface::try_new(30.0, -10.0).unwrap();
-        assert_eq!(surface.slope(), 30.0);
-        assert_eq!(surface.azimuth_rotation(), -10.0);
+        assert_eq!(surface.slope(), 30.0_f64);
+        assert_eq!(surface.azimuth_rotation(), -10.0_f64);
     }
 
     #[test]
     fn surface_accepts_inclusive_bounds() {
-        for &slope in &[0.0_f64, 180.0] {
-            for &azimuth in &[-180.0_f64, 180.0] {
+        for &slope in &[0.0_f64, 180.0_f64] {
+            for &azimuth in &[-180.0_f64, 180.0_f64] {
                 assert!(Surface::try_new(slope, azimuth).is_ok());
             }
         }
@@ -1056,9 +1136,9 @@ mod tests {
             f64::NAN,
             f64::INFINITY,
             f64::NEG_INFINITY,
-            -0.000_001,
-            180.000_001,
-            360.0,
+            -0.000_001_f64,
+            180.000_001_f64,
+            360.0_f64,
         ] {
             assert!(matches!(
                 Surface::try_new(bad, 0.0),
@@ -1073,9 +1153,9 @@ mod tests {
             f64::NAN,
             f64::INFINITY,
             f64::NEG_INFINITY,
-            180.000_001,
-            -180.000_001,
-            360.0,
+            180.000_001_f64,
+            -180.000_001_f64,
+            360.0_f64,
         ] {
             assert!(matches!(
                 Surface::try_new(0.0, bad),
@@ -1085,11 +1165,14 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn surface_horizontal_and_default_are_equivalent() {
         let h = Surface::horizontal();
-        assert_eq!(h.slope(), 0.0);
-        assert_eq!(h.azimuth_rotation(), 0.0);
+        assert_eq!(h.slope(), 0.0_f64);
+        assert_eq!(h.azimuth_rotation(), 0.0_f64);
         assert_eq!(Surface::default(), h);
     }
 

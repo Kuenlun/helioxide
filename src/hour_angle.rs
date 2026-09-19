@@ -105,47 +105,50 @@ mod tests {
     fn observer_local_hour_angle_matches_table_a5_1() {
         let (nu, alpha) = reference_nu_and_alpha();
         let h = observer_local_hour_angle(nu, -105.1786, alpha);
-        assert!((h - 11.105_900).abs() < 1e-4);
+        assert!((h - 11.105_900).abs() < 1e-4_f64);
     }
 
     #[test]
     fn observer_local_hour_angle_treats_longitude_as_positive_east() {
-        let (nu, alpha) = (100.0, 50.0);
-        for &sigma in &[10.0_f64, 45.0, 105.1786, 179.0] {
+        let (nu, alpha) = (100.0_f64, 50.0_f64);
+        for &sigma in &[10.0_f64, 45.0_f64, 105.178_6_f64, 179.0_f64] {
             let east = observer_local_hour_angle(nu, sigma, alpha);
             let west = observer_local_hour_angle(nu, -sigma, alpha);
             let actual = (east - west).rem_euclid(360.0);
             let expected = (2.0 * sigma).rem_euclid(360.0);
-            assert!((actual - expected).abs() < 1e-12);
+            assert!((actual - expected).abs() < 1e-12_f64);
         }
     }
 
     #[test]
     fn observer_local_hour_angle_wraps_into_zero_360() {
         for &(nu, sigma, alpha) in &[
-            (0.0_f64, -180.0, 0.0),
-            (10.0, -180.0, 50.0),
-            (350.0, 180.0, 0.0),
-            (720.0, 0.0, -100.0),
-            (-100.0, 0.0, 0.0),
+            (0.0_f64, -180.0_f64, 0.0_f64),
+            (10.0_f64, -180.0_f64, 50.0_f64),
+            (350.0_f64, 180.0_f64, 0.0_f64),
+            (720.0_f64, 0.0_f64, -100.0_f64),
+            (-100.0_f64, 0.0_f64, 0.0_f64),
         ] {
             let h = observer_local_hour_angle(nu, sigma, alpha);
-            assert!((0.0..360.0).contains(&h));
+            assert!((0.0_f64..360.0_f64).contains(&h));
         }
     }
 
     #[test]
     fn observer_local_hour_angle_is_linear_in_each_input() {
         let baseline = observer_local_hour_angle(200.0, 50.0, 100.0);
-        for &d in &[-1.0_f64, -1e-3, 1e-6, 0.5] {
+        for &d in &[-1.0_f64, -1e-3_f64, 1e-6_f64, 0.5_f64] {
             assert!(
-                (observer_local_hour_angle(200.0 + d, 50.0, 100.0) - baseline - d).abs() < 1e-13
+                (observer_local_hour_angle(200.0 + d, 50.0, 100.0) - baseline - d).abs()
+                    < 1e-13_f64
             );
             assert!(
-                (observer_local_hour_angle(200.0, 50.0 + d, 100.0) - baseline - d).abs() < 1e-13
+                (observer_local_hour_angle(200.0, 50.0 + d, 100.0) - baseline - d).abs()
+                    < 1e-13_f64
             );
             assert!(
-                (observer_local_hour_angle(200.0, 50.0, 100.0 + d) - baseline + d).abs() < 1e-13
+                (observer_local_hour_angle(200.0, 50.0, 100.0 + d) - baseline + d).abs()
+                    < 1e-13_f64
             );
         }
     }
@@ -154,22 +157,29 @@ mod tests {
     fn topocentric_local_hour_angle_matches_table_a5_1() {
         let (h, delta_alpha) = reference_h_and_delta_alpha();
         let h_prime = topocentric_local_hour_angle(h, delta_alpha);
-        assert!((h_prime - 11.106_29).abs() < 1e-4);
+        assert!((h_prime - 11.106_29).abs() < 1e-4_f64);
     }
 
     #[test]
     fn topocentric_local_hour_angle_is_linear() {
         let baseline = topocentric_local_hour_angle(100.0, 1e-3);
-        for &d in &[-1.0_f64, -1e-4, 1e-6, 0.5] {
-            assert!((topocentric_local_hour_angle(100.0 + d, 1e-3) - baseline - d).abs() < 1e-13);
-            assert!((topocentric_local_hour_angle(100.0, 1e-3 + d) - baseline + d).abs() < 1e-13);
+        for &d in &[-1.0_f64, -1e-4_f64, 1e-6_f64, 0.5_f64] {
+            assert!(
+                (topocentric_local_hour_angle(100.0 + d, 1e-3) - baseline - d).abs() < 1e-13_f64
+            );
+            assert!(
+                (topocentric_local_hour_angle(100.0, 1e-3 + d) - baseline + d).abs() < 1e-13_f64
+            );
         }
     }
 
     #[test]
     fn topocentric_local_hour_angle_does_not_wrap() {
-        for &(h, da, expected) in &[(1e-4_f64, 1.0, 1e-4 - 1.0), (359.9, -1.0, 360.9)] {
-            assert!((topocentric_local_hour_angle(h, da) - expected).abs() < 1e-13);
+        for &(h, da, expected) in &[
+            (1e-4_f64, 1.0_f64, 1e-4_f64 - 1.0_f64),
+            (359.9_f64, -1.0_f64, 360.9_f64),
+        ] {
+            assert!((topocentric_local_hour_angle(h, da) - expected).abs() < 1e-13_f64);
         }
     }
 }

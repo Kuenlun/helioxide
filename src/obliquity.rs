@@ -13,7 +13,7 @@ const MEAN_OBLIQUITY_COEFFICIENTS: [f64; 11] = [
 /// Mean obliquity of the ecliptic `ε₀` (arc seconds). Equation 24.
 #[must_use]
 pub fn mean_obliquity_of_ecliptic_arcseconds(jme: f64) -> f64 {
-    let u = jme / 10.0;
+    let u = jme / 10.0_f64;
     MEAN_OBLIQUITY_COEFFICIENTS
         .iter()
         .rev()
@@ -37,7 +37,7 @@ mod tests {
     fn true_obliquity_matches_table_a5_1() {
         let (_, delta_epsilon) = nutation_in_longitude_and_obliquity(reference_jce());
         let epsilon = true_obliquity_of_ecliptic(reference_jme(), delta_epsilon);
-        assert!((epsilon - 23.440_465).abs() < 1e-6);
+        assert!((epsilon - 23.440_465).abs() < 1e-6_f64);
     }
 
     #[test]
@@ -50,9 +50,9 @@ mod tests {
     fn true_obliquity_offsets_by_delta_epsilon() {
         let jme = reference_jme();
         let baseline = true_obliquity_of_ecliptic(jme, 0.0);
-        for &delta in &[-0.5_f64, -1e-3, 1e-6, 0.5] {
+        for &delta in &[-0.5_f64, -1e-3_f64, 1e-6_f64, 0.5_f64] {
             let shifted = true_obliquity_of_ecliptic(jme, delta);
-            assert!((shifted - baseline - delta).abs() < 1e-13);
+            assert!((shifted - baseline - delta).abs() < 1e-13_f64);
         }
     }
 
@@ -60,13 +60,16 @@ mod tests {
     fn mean_obliquity_arcseconds_matches_table_a5_1_via_round_trip() {
         let (_, delta_epsilon) = nutation_in_longitude_and_obliquity(reference_jce());
         let from_fn = mean_obliquity_of_ecliptic_arcseconds(reference_jme());
-        let from_round_trip = (23.440_465_f64 - delta_epsilon) * 3600.0;
-        assert!((from_fn - from_round_trip).abs() < 0.1);
+        let from_round_trip = (23.440_465_f64 - delta_epsilon) * 3_600.0_f64;
+        assert!((from_fn - from_round_trip).abs() < 0.1_f64);
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn mean_obliquity_arcseconds_at_j2000_collapses_to_constant() {
-        assert_eq!(mean_obliquity_of_ecliptic_arcseconds(0.0), 84_381.448);
+        assert_eq!(mean_obliquity_of_ecliptic_arcseconds(0.0), 84_381.448_f64);
     }
 }
