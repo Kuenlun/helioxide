@@ -5,7 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased](https://github.com/Kuenlun/helioxide/compare/v0.6.0...HEAD)
+## [Unreleased](https://github.com/Kuenlun/helioxide/compare/v0.7.0...HEAD)
+
+## [0.7.0](https://github.com/Kuenlun/helioxide/compare/v0.6.0...v0.7.0) - 2026-09-20
+
+### Added
+
+- Extend observed delta T with monthly USNO samples for May through September 2026 and daily observations through September 17 at 00:00 UTC. Interpolate between observations, exclude predictions, and retain the polynomial fallback outside the observed interval. ([#46](https://github.com/Kuenlun/helioxide/pull/46))
+
+### Changed
+
+- **BREAKING:** `SolarPosition::compute`, `SolarDay::compute`, and their `compute_with_delta_t` variants now return `Result<_, SpaTimeError>`. Propagate failures with `?` or handle them explicitly. Add `YearOutOfRange`, `DeltaTOutOfRange`, `EventOutOfRange`, and `GregorianReformGap` variants, which require updating exhaustive matches on `SpaTimeError`. Solar computations accept UTC years from -2000 through 6000 and finite delta T within ±86400 seconds. Low-level calendar conversions retain Chrono's wider date range. ([#43](https://github.com/Kuenlun/helioxide/pull/43), [#44](https://github.com/Kuenlun/helioxide/pull/44))
+- **BREAKING:** Restrict `Observer` pressure to [0, 5000] mbar and temperature to (-273, 6000] Celsius. Previously accepted values above these upper bounds now return an error. Zero pressure is now accepted and disables atmospheric refraction. Expose the upper bounds as `Observer::MAX_PRESSURE_MILLIBARS` and `Observer::MAX_TEMPERATURE_CELSIUS`. ([#43](https://github.com/Kuenlun/helioxide/pull/43))
+- Harden Rust, Clippy, and rustdoc checks, replacing dummy dependency imports with scoped, justified lint expectations while retaining package-level unused-dependency detection. Pin Lockpick to a revision that respects the project's lint policy. ([#40](https://github.com/Kuenlun/helioxide/pull/40))
+- Pin workflow actions and check and release tools, including the Rust toolchain used by release-plz. Require the committed `Cargo.lock` during checks and binary release builds, and use the same cross version for release builds and dry runs. ([#49](https://github.com/Kuenlun/helioxide/pull/49))
+
+### Fixed
+
+- Solve sunrise and sunset on their actual dates instead of changing the date after calculating the clock time. Refine each horizon crossing independently with bounded iteration, allowing a single event at polar transitions. Preserve adjacent-day events, use the input offset when local midnight is skipped, and convert event dates with millisecond precision and checked timezone projection. ([#47](https://github.com/Kuenlun/helioxide/pull/47))
+- Preserve October 4, 1582 throughout the day and apply rounded day carry before decoding the Julian or Gregorian date. Reject the skipped reform dates, unrepresentable Julian leap-day labels, and overflowing or invalid timezone projections. Correct negative-Julian-day conversions and return `None` for dates outside Chrono's representable range. ([#40](https://github.com/Kuenlun/helioxide/pull/40), [#44](https://github.com/Kuenlun/helioxide/pull/44))
+- Bound unit-vector roundoff before inverse trigonometry in elevation, incidence, event altitude, and geocentric declination calculations, preventing spurious NaN results for aligned or opposite directions while preserving NaN inputs. Use the unrounded -0.83337-degree horizon consistently for refraction and solar events. ([#42](https://github.com/Kuenlun/helioxide/pull/42), [#48](https://github.com/Kuenlun/helioxide/pull/48))
+- Keep normalized angles in [0, 360) and approximate event fractions in [0, 1) when tiny negative inputs round to the excluded upper endpoint. Correct the documented signed azimuth interval and remove the incorrect claim that parallax preserves wrapped right ascension. ([#42](https://github.com/Kuenlun/helioxide/pull/42), [#48](https://github.com/Kuenlun/helioxide/pull/48))
+- Return the final observed delta-T sample at its exact timestamp instead of falling back to a polynomial estimate because no later interpolation sample exists. ([#45](https://github.com/Kuenlun/helioxide/pull/45))
+- Reject invalid event fractions and date arithmetic overflow instead of producing fictitious midnight events or panicking. ([#43](https://github.com/Kuenlun/helioxide/pull/43))
+- Enforce complete function, line, region, and branch coverage through Lockpick in local checks, the commit hook, and every CI platform. Run CI for pull requests targeting working branches and reject incomplete coverage reports. ([#41](https://github.com/Kuenlun/helioxide/pull/41))
+
+### Removed
+
+- Remove the duplicate coverage parser, the commit hook's coverage bypass, and its call to a deleted license-check script. Lockpick runs the shared coverage and license checks. ([#41](https://github.com/Kuenlun/helioxide/pull/41))
 
 ## [0.6.0](https://github.com/Kuenlun/helioxide/compare/v0.5.1...v0.6.0) - 2026-06-10
 
