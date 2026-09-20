@@ -6,6 +6,8 @@
 
 use core::fmt;
 
+use crate::time::{SpaTimeError, validate_spa_time};
+
 use chrono::TimeZone;
 use thiserror::Error;
 
@@ -46,14 +48,19 @@ impl Observer {
     /// `T = -273 °C` exactly (the paper uses `273`, not `273.15`).
     pub const TEMPERATURE_FLOOR_CELSIUS_EXCLUSIVE: f64 = -horizontal::KELVIN_OFFSET_FROM_CELSIUS;
 
+    /// Maximum atmospheric pressure accepted by SPA, in millibars.
+    pub const MAX_PRESSURE_MILLIBARS: f64 = 5000.0;
+    /// Upper temperature bound accepted by SPA, in Celsius.
+    pub const MAX_TEMPERATURE_CELSIUS: f64 = 6000.0;
+
     /// Build with explicit atmosphere.
     ///
     /// # Errors
     /// * `latitude` finite, in `[-90°, 90°]`.
     /// * `longitude` finite, in `[-180°, 180°]`.
     /// * `elevation` finite (no range).
-    /// * `pressure` finite, strictly positive.
-    /// * `temperature` finite, strictly above [`Self::TEMPERATURE_FLOOR_CELSIUS_EXCLUSIVE`].
+    /// * `pressure` finite, in `[0, 5000]` mbar. Zero disables refraction.
+    /// * `temperature` finite, in `(-273, 6000]` Celsius.
     #[inline]
     pub fn try_new(
         latitude: f64,
@@ -71,10 +78,12 @@ impl Observer {
         if !elevation.is_finite() {
             return Err(ObserverError::InvalidElevation(elevation));
         }
-        if !pressure.is_finite() || pressure <= 0.0_f64 {
+        if !(0.0_f64..=Self::MAX_PRESSURE_MILLIBARS).contains(&pressure) {
             return Err(ObserverError::InvalidPressure(pressure));
         }
-        if !temperature.is_finite() || temperature <= Self::TEMPERATURE_FLOOR_CELSIUS_EXCLUSIVE {
+        if !(temperature > Self::TEMPERATURE_FLOOR_CELSIUS_EXCLUSIVE
+            && temperature <= Self::MAX_TEMPERATURE_CELSIUS)
+        {
             return Err(ObserverError::InvalidTemperature(temperature));
         }
         Ok(Self {
@@ -169,12 +178,12 @@ pub enum ObserverError {
     /// Elevation is non-finite.
     #[error("elevation {0} m must be finite")]
     InvalidElevation(f64),
-    /// Pressure is non-finite or not strictly positive.
-    #[error("pressure {0} mbar must be > 0 mbar and finite")]
+    /// Pressure is non-finite or outside [0, 5000] millibars.
+    #[error("pressure {0} mbar must lie in [0, 5000] mbar and be finite")]
     InvalidPressure(f64),
-    /// Temperature is non-finite or at or below -273 degrees Celsius.
+    /// Temperature is non-finite or outside (-273, 6000] degrees Celsius.
     #[error(
-        "temperature {0} °C must be > -273 °C and finite \
+        "temperature {0} °C must lie in (-273, 6000] °C and be finite \
          (equation 42's denominator 273 + T vanishes at -273 °C)"
     )]
     InvalidTemperature(f64),
@@ -355,8 +364,14 @@ impl SolarPosition {
     /// [`Self::compute_with_delta_t`] to pin a specific `ΔT`, and
     /// [`Self::surface_incidence`] for the angle of incidence on a tilted
     /// surface.
-    #[must_use]
-    pub fn compute<Tz: TimeZone>(datetime: &SpaDateTime<Tz>, observer: Observer) -> Self {
+    ///
+    /// # Errors
+    /// Returns [`SpaTimeError`] for unsupported UTC years, invalid delta T
+    /// or unrepresentable event times.
+    pub fn compute<Tz: TimeZone>(
+        datetime: &SpaDateTime<Tz>,
+        observer: Observer,
+    ) -> Result<Self, SpaTimeError> {
         let delta_t = crate::delta_t::delta_t_seconds_for_datetime(datetime.datetime());
         Self::compute_with_delta_t(datetime, delta_t, observer)
     }
@@ -367,7 +382,10 @@ impl SolarPosition {
     /// Reach for this when reproducing NREL reference cases or honouring an
     /// IERS bulletin value; otherwise [`Self::compute`] picks the best
     /// available `ΔT` automatically.
-    #[must_use]
+    ///
+    /// # Errors
+    /// Returns [`SpaTimeError`] for unsupported UTC years, invalid delta T
+    /// or unrepresentable event times.
     #[expect(
         clippy::many_single_char_names,
         reason = "Keep the parameter names and grouping used by the SPA equations."
@@ -376,7 +394,8 @@ impl SolarPosition {
         datetime: &SpaDateTime<Tz>,
         delta_t: f64,
         observer: Observer,
-    ) -> Self {
+    ) -> Result<Self, SpaTimeError> {
+        validate_spa_time(datetime, delta_t)?;
         let jd = julian::julian_day(datetime);
         let jde = julian::julian_ephemeris_day(jd, delta_t);
         let jc = julian::julian_century(jd);
@@ -438,7 +457,7 @@ impl SolarPosition {
         let m = equation_of_time::sun_mean_longitude(jme);
         let eot = equation_of_time::equation_of_time(m, alpha, delta_psi, epsilon);
 
-        Self {
+        Ok(Self {
             julian_day: jd,
             julian_ephemeris_day: jde,
             julian_century: jc,
@@ -478,7 +497,7 @@ impl SolarPosition {
             astronomers_azimuth_signed: gamma_signed,
             topocentric_azimuth: azimuth,
             equation_of_time: eot,
-        }
+        })
     }
 
     /// Angle of incidence `I` (degrees) of the sun on `surface`.
@@ -715,6 +734,7 @@ mod tests {
             REFERENCE_DELTA_T_SECONDS,
             reference_observer(),
         )
+        .unwrap()
     }
 
     #[test]
@@ -778,7 +798,8 @@ mod tests {
 
         let dt = reference_datetime();
         let observer = reference_observer();
-        let p = SolarPosition::compute_with_delta_t(&dt, REFERENCE_DELTA_T_SECONDS, observer);
+        let p =
+            SolarPosition::compute_with_delta_t(&dt, REFERENCE_DELTA_T_SECONDS, observer).unwrap();
 
         let jd = julian::julian_day(&dt);
         let jde = julian::julian_ephemeris_day(jd, REFERENCE_DELTA_T_SECONDS);
@@ -1041,7 +1062,8 @@ mod tests {
             f64::NAN,
             f64::INFINITY,
             f64::NEG_INFINITY,
-            0.0_f64,
+            5_000.000_001_f64,
+            f64::MAX,
             -1.0_f64,
             -1_013.25_f64,
         ] {
@@ -1061,6 +1083,8 @@ mod tests {
             -273.0_f64,
             -273.000_001_f64,
             -1e6_f64,
+            6_000.000_001_f64,
+            f64::MAX,
         ] {
             assert!(matches!(
                 Observer::try_new(0.0, 0.0, 0.0, 1013.25, bad),
@@ -1184,5 +1208,15 @@ mod tests {
         ] {
             assert!(format!("{err}").contains(field));
         }
+    }
+
+    #[test]
+    fn observer_accepts_zero_pressure_and_rejects_overflowing_atmospheres() {
+        let vacuum = Observer::try_new(0.0, 0.0, 0.0, 0.0, 10.0).unwrap();
+        let position =
+            SolarPosition::compute_with_delta_t(&reference_datetime(), 67.0, vacuum).unwrap();
+        assert!(position.atmospheric_refraction.abs() < f64::EPSILON);
+        assert!(Observer::try_new(0.0, 0.0, 0.0, 5000.0, 6000.0).is_ok());
+        assert!(Observer::try_new(0.0, 0.0, 0.0, f64::MAX, -272.999).is_err());
     }
 }

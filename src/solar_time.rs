@@ -11,6 +11,8 @@
 
 use core::fmt;
 
+use crate::time::{SpaTimeError, validate_spa_time};
+
 use chrono::{DateTime, MappedLocalTime, TimeDelta, TimeZone, Utc};
 
 use crate::SpaDateTime;
@@ -255,15 +257,21 @@ impl<Tz: TimeZone> SolarDay<Tz> {
     /// [`SUN_ELEVATION_AT_HORIZON_DEGREES`].
     ///
     /// [`DateTime<Utc>`]: chrono::DateTime
-    #[must_use]
-    pub fn compute(datetime: &SpaDateTime<Tz>, observer: Observer) -> Self {
+    ///
+    /// # Errors
+    /// Returns [`SpaTimeError`] for unsupported UTC years, invalid delta T
+    /// or unrepresentable event times.
+    pub fn compute(datetime: &SpaDateTime<Tz>, observer: Observer) -> Result<Self, SpaTimeError> {
         let delta_t = crate::delta_t::delta_t_seconds_for_datetime(datetime.datetime());
         Self::compute_with_delta_t(datetime, delta_t, observer)
     }
 
     /// Compute the same sunrise, transit and sunset readout as [`Self::compute`]
     /// with an explicit `ΔT = TT − UT1` (seconds).
-    #[must_use]
+    ///
+    /// # Errors
+    /// Returns [`SpaTimeError`] for unsupported UTC years, invalid delta T
+    /// or unrepresentable event times.
     #[expect(
         clippy::similar_names,
         reason = "Keep the parameter names and grouping used by the SPA equations."
@@ -272,7 +280,8 @@ impl<Tz: TimeZone> SolarDay<Tz> {
         datetime: &SpaDateTime<Tz>,
         delta_t_seconds: f64,
         observer: Observer,
-    ) -> Self {
+    ) -> Result<Self, SpaTimeError> {
+        validate_spa_time(datetime, delta_t_seconds)?;
         let tz = datetime.datetime().timezone();
         let utc_anchor = local_civil_midnight_in_utc(datetime.datetime());
         let datetime_at_anchor = datetime.with_datetime(utc_anchor);
@@ -338,23 +347,28 @@ impl<Tz: TimeZone> SolarDay<Tz> {
             (Some(r), Some(s))
         });
 
+        Self::from_events(
+            utc_anchor,
+            &tz,
+            observer.latitude(),
+            transit_event,
+            sunrise_event,
+            sunset_event,
+        )
+    }
+
+    fn from_events(
+        utc_anchor: DateTime<Utc>,
+        timezone: &Tz,
+        latitude: f64,
+        transit_event: RefinedEvent,
+        sunrise_event: Option<RefinedEvent>,
+        sunset_event: Option<RefinedEvent>,
+    ) -> Result<Self, SpaTimeError> {
         // Wrap T into [0, 1) and unwrap R, S to the closest representative
         // around T, preserving sunrise < transit < sunset across day boundaries.
         let transit_wrapped = transit_event.fraction_of_day.rem_euclid(1.0);
-        #[expect(
-            clippy::arithmetic_side_effects,
-            reason = "Solar events add at most an adjacent day; Chrono enforces its representable date range."
-        )]
-        let to_datetime = |fraction_of_day: f64| -> DateTime<Tz> {
-            // Round to whole milliseconds: appendix A.2 publishes to 0.01 s.
-            #[expect(
-                clippy::cast_possible_truncation,
-                clippy::as_conversions,
-                reason = "The SPA equations round or truncate floating-point calendar components before validation."
-            )]
-            let milliseconds = (fraction_of_day * (SECONDS_PER_DAY * 1000.0)).round() as i64;
-            (utc_anchor + TimeDelta::milliseconds(milliseconds)).with_timezone(&tz)
-        };
+        let to_datetime = |fraction| event_datetime(utc_anchor, timezone, fraction);
         let unwrap_to_transit = |fraction: f64| -> f64 {
             let raw = fraction - transit_wrapped;
             if raw > 0.5_f64 {
@@ -367,20 +381,44 @@ impl<Tz: TimeZone> SolarDay<Tz> {
         };
 
         let sun_transit_altitude = sun_altitude_at_event(
-            observer.latitude(),
+            latitude,
             transit_event.interpolated_declination,
             transit_event.local_hour_angle,
         );
 
-        Self {
-            transit: to_datetime(transit_wrapped),
-            sunrise: sunrise_event.map(|r| to_datetime(unwrap_to_transit(r.fraction_of_day))),
-            sunset: sunset_event.map(|s| to_datetime(unwrap_to_transit(s.fraction_of_day))),
+        Ok(Self {
+            transit: to_datetime(transit_wrapped)?,
+            sunrise: sunrise_event
+                .map(|r| to_datetime(unwrap_to_transit(r.fraction_of_day)))
+                .transpose()?,
+            sunset: sunset_event
+                .map(|s| to_datetime(unwrap_to_transit(s.fraction_of_day)))
+                .transpose()?,
             sun_transit_altitude,
             sunrise_hour_angle: sunrise_event.map(|r| r.local_hour_angle),
             sunset_hour_angle: sunset_event.map(|s| s.local_hour_angle),
-        }
+        })
     }
+}
+
+fn event_datetime<Tz: TimeZone>(
+    utc_anchor: DateTime<Utc>,
+    timezone: &Tz,
+    fraction_of_day: f64,
+) -> Result<DateTime<Tz>, SpaTimeError> {
+    if !(-1.0_f64..=2.0_f64).contains(&fraction_of_day) {
+        return Err(SpaTimeError::EventOutOfRange);
+    }
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::as_conversions,
+        reason = "A validated fraction in [-1, 2] rounds to at most 172800000 milliseconds, within i64."
+    )]
+    let milliseconds = (fraction_of_day * (SECONDS_PER_DAY * 1000.0)).round() as i64;
+    utc_anchor
+        .checked_add_signed(TimeDelta::milliseconds(milliseconds))
+        .map(|datetime| datetime.with_timezone(timezone))
+        .ok_or(SpaTimeError::EventOutOfRange)
 }
 
 impl<Tz: TimeZone> fmt::Display for SolarDay<Tz>
@@ -562,6 +600,7 @@ mod tests {
             REFERENCE_DELTA_T_SECONDS,
             reference_observer(),
         )
+        .unwrap()
     }
 
     fn fraction_to_clock_seconds(fraction_of_day: f64) -> i64 {
@@ -622,7 +661,8 @@ mod tests {
             &madrid_dt,
             REFERENCE_DELTA_T_SECONDS,
             reference_observer(),
-        );
+        )
+        .unwrap();
 
         let expected_sunrise = chrono_tz::Europe::Madrid
             .with_ymd_and_hms(2003, 10, 17, 15, 12, 43)
@@ -662,9 +702,11 @@ mod tests {
             &morning,
             REFERENCE_DELTA_T_SECONDS,
             reference_observer(),
-        );
+        )
+        .unwrap();
         let day_early =
-            SolarDay::compute_with_delta_t(&early, REFERENCE_DELTA_T_SECONDS, reference_observer());
+            SolarDay::compute_with_delta_t(&early, REFERENCE_DELTA_T_SECONDS, reference_observer())
+                .unwrap();
         assert!(
             (day_morning.transit - day_early.transit)
                 .num_milliseconds()
@@ -683,7 +725,7 @@ mod tests {
         let azores = chrono_tz::Atlantic::Azores;
         let dt = SpaDateTime::new(azores.with_ymd_and_hms(2003, 10, 26, 12, 0, 0).unwrap());
         let observer = Observer::try_new(37.741, -25.668, 50.0, 1015.0, 18.0).unwrap();
-        let day = SolarDay::compute_with_delta_t(&dt, REFERENCE_DELTA_T_SECONDS, observer);
+        let day = SolarDay::compute_with_delta_t(&dt, REFERENCE_DELTA_T_SECONDS, observer).unwrap();
         assert!(day.sunrise.unwrap() < day.transit);
         assert!(day.transit < day.sunset.unwrap());
     }
@@ -694,7 +736,7 @@ mod tests {
         let sao_paulo = chrono_tz::America::Sao_Paulo;
         let dt = SpaDateTime::new(sao_paulo.with_ymd_and_hms(2017, 10, 15, 12, 0, 0).unwrap());
         let observer = Observer::try_new(-23.533, -46.625, 760.0, 1010.0, 22.0).unwrap();
-        let day = SolarDay::compute_with_delta_t(&dt, REFERENCE_DELTA_T_SECONDS, observer);
+        let day = SolarDay::compute_with_delta_t(&dt, REFERENCE_DELTA_T_SECONDS, observer).unwrap();
         assert!(day.sunrise.unwrap() < day.transit);
         assert!(day.transit < day.sunset.unwrap());
     }
@@ -705,12 +747,14 @@ mod tests {
             &reference_datetime(),
             REFERENCE_DELTA_T_SECONDS,
             reference_observer(),
-        );
+        )
+        .unwrap();
         let with_dut1 = SolarDay::compute_with_delta_t(
             &reference_datetime().try_with_dut1(0.5).unwrap(),
             REFERENCE_DELTA_T_SECONDS,
             reference_observer(),
-        );
+        )
+        .unwrap();
         let shift_ms = (with_dut1.transit - zero.transit).num_milliseconds();
         // UT1 leads UTC by DUT1, so the UTC clock reads the event earlier.
         assert!((shift_ms - -500).abs() < 50);
@@ -720,7 +764,7 @@ mod tests {
     fn solar_day_polar_night_returns_none() {
         let polar = Observer::try_new(80.0, 0.0, 0.0, 1010.0, -20.0).unwrap();
         let solstice = SpaDateTime::new(Utc.with_ymd_and_hms(2026, 12, 21, 12, 0, 0).unwrap());
-        let day = SolarDay::compute_with_delta_t(&solstice, 70.0, polar);
+        let day = SolarDay::compute_with_delta_t(&solstice, 70.0, polar).unwrap();
         assert!(day.sunrise.is_none());
         assert!(day.sunset.is_none());
     }
@@ -729,7 +773,7 @@ mod tests {
     fn solar_day_polar_day_returns_none() {
         let polar = Observer::try_new(80.0, 0.0, 0.0, 1010.0, 0.0).unwrap();
         let solstice = SpaDateTime::new(Utc.with_ymd_and_hms(2026, 6, 21, 12, 0, 0).unwrap());
-        let day = SolarDay::compute_with_delta_t(&solstice, 70.0, polar);
+        let day = SolarDay::compute_with_delta_t(&solstice, 70.0, polar).unwrap();
         assert!(day.sunrise.is_none());
         assert!(day.sunset.is_none());
     }
@@ -1040,7 +1084,7 @@ mod tests {
     fn solar_day_unwraps_sunrise_to_previous_ut_day_for_east_observer() {
         let observer = Observer::try_new(-33.8, 150.0, 0.0, 1010.0, 18.0).unwrap();
         let utc_noon = SpaDateTime::new(Utc.with_ymd_and_hms(2026, 3, 20, 12, 0, 0).unwrap());
-        let day = SolarDay::compute_with_delta_t(&utc_noon, 70.0, observer);
+        let day = SolarDay::compute_with_delta_t(&utc_noon, 70.0, observer).unwrap();
         let sunrise = day.sunrise.unwrap();
         assert!(sunrise < day.transit);
         assert!(day.transit < day.sunset.unwrap());
@@ -1138,5 +1182,55 @@ mod tests {
         assert!((sun_altitude_at_event(0.015, 0.015, 0.0) - 90.0).abs() < 1e-12_f64);
         assert!((sun_altitude_at_event(0.015, -0.015, 180.0) + 90.0).abs() < 1e-12_f64);
         assert!(sun_altitude_at_event(f64::NAN, 0.0, 0.0).is_nan());
+    }
+
+    #[test]
+    fn event_datetime_rejects_invalid_fractions_and_date_overflow() {
+        use super::event_datetime;
+        use crate::SpaTimeError;
+        use chrono::DateTime;
+
+        let anchor = Utc.with_ymd_and_hms(2026, 5, 18, 0, 0, 0).unwrap();
+        for fraction in [f64::NAN, f64::INFINITY, -1.001_f64, 2.001_f64] {
+            assert_eq!(
+                event_datetime(anchor, &Utc, fraction),
+                Err(SpaTimeError::EventOutOfRange)
+            );
+        }
+        assert_eq!(
+            event_datetime(DateTime::<Utc>::MAX_UTC, &Utc, 1.0),
+            Err(SpaTimeError::EventOutOfRange)
+        );
+        assert_eq!(
+            event_datetime(DateTime::<Utc>::MIN_UTC, &Utc, -1.0),
+            Err(SpaTimeError::EventOutOfRange)
+        );
+    }
+
+    #[test]
+    fn invalid_solver_results_cannot_become_midnight_events() {
+        use super::RefinedEvent;
+        use crate::SpaTimeError;
+
+        let anchor = Utc.with_ymd_and_hms(2026, 5, 18, 0, 0, 0).unwrap();
+        let event = RefinedEvent {
+            fraction_of_day: 0.5,
+            local_hour_angle: 0.0,
+            interpolated_declination: 0.0,
+        };
+        let invalid = RefinedEvent {
+            fraction_of_day: f64::NAN,
+            ..event
+        };
+        for (transit, sunrise, sunset) in [
+            (invalid, Some(event), Some(event)),
+            (event, Some(invalid), Some(event)),
+            (event, Some(event), Some(invalid)),
+        ] {
+            assert_eq!(
+                SolarDay::from_events(anchor, &Utc, 0.0, transit, sunrise, sunset),
+                Err(SpaTimeError::EventOutOfRange)
+            );
+        }
     }
 }

@@ -139,7 +139,7 @@ mod tests {
         let start = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
         for hour in 0..8760 {
             let datetime = SpaDateTime::new(start + TimeDelta::hours(hour));
-            let position = SolarPosition::compute_with_delta_t(&datetime, 69.1, observer);
+            let position = SolarPosition::compute_with_delta_t(&datetime, 69.1, observer).unwrap();
             let surface = Surface::try_new(
                 position.topocentric_zenith,
                 position.astronomers_azimuth_signed,
