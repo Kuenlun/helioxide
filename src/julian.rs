@@ -53,8 +53,9 @@ pub fn julian_day<Tz: TimeZone>(datetime: &SpaDateTime<Tz>) -> f64 {
         (f64::from(dt.year()), f64::from(dt.month()))
     };
 
-    let julian_day =
-        int(365.25 * (year + 4716.0)) + int(30.6001 * (month + 1.0)) + (day_decimal - 1_524.5_f64);
+    let julian_day = (365.25 * (year + 4716.0)).floor()
+        + int(30.6001 * (month + 1.0))
+        + (day_decimal - 1_524.5_f64);
     if (dt.year(), dt.month(), dt.day()) >= FIRST_GREGORIAN_DATE {
         let a = int(year / 100.0);
         julian_day + (2.0 - a + int(a / 4.0))
@@ -82,7 +83,7 @@ pub fn calendar_date_from_julian_day(julian_day: f64, tz: Tz) -> Option<DateTime
         return None;
     }
     let jd_plus_half = julian_day + 0.5_f64;
-    let unrounded_day = int(jd_plus_half);
+    let unrounded_day = jd_plus_half.floor();
     let rounded_seconds = ((jd_plus_half - unrounded_day) * SECONDS_PER_DAY).round();
     // Advance the astronomical day before decoding its calendar label.
     // Chrono's next Gregorian date can skip a Julian leap day or enter the reform gap.
@@ -97,8 +98,8 @@ pub fn calendar_date_from_julian_day(julian_day: f64, tz: Tz) -> Option<DateTime
     };
 
     let c = a + 1_524.0_f64;
-    let d = int((c - 122.1) / 365.25);
-    let g = int(365.25 * d);
+    let d = ((c - 122.1) / 365.25).floor();
+    let g = (365.25 * d).floor();
     let i = int((c - g) / 30.6001);
     let day_decimal = c - g - int(30.6001 * i);
 
@@ -120,14 +121,27 @@ pub fn calendar_date_from_julian_day(julian_day: f64, tz: Tz) -> Option<DateTime
         let time = NaiveTime::MIN
             .overflowing_add_signed(TimeDelta::seconds(seconds_into_day))
             .0;
-        let local = Utc
-            .from_utc_datetime(&NaiveDateTime::new(date, time))
-            .with_timezone(&tz);
-        local
-            .naive_utc()
-            .checked_add_offset(local.offset().fix())
-            .map(|_| local)
+        project_calendar_datetime(NaiveDateTime::new(date, time), &tz)
     })
+}
+
+pub(crate) fn project_calendar_datetime<Tz: TimeZone>(
+    naive: NaiveDateTime,
+    tz: &Tz,
+) -> Option<DateTime<Tz>> {
+    let local = Utc.from_utc_datetime(&naive).with_timezone(tz);
+    let offset = local.offset().fix();
+    let local_naive = naive.checked_add_offset(offset)?;
+    // Chrono cannot project across a missing mixed-calendar day. Compare the
+    // labels' Julian days, allowing subsecond rounding but no whole-day mismatch.
+    let utc_jd = julian_day(&SpaDateTime::new(naive.and_utc()));
+    let local_jd = julian_day(&SpaDateTime::new(local_naive.and_utc()));
+    let expected_shift = f64::from(offset.local_minus_utc()) / SECONDS_PER_DAY;
+    if ((local_jd - utc_jd) - expected_shift).abs() < 0.5_f64 {
+        Some(local)
+    } else {
+        None
+    }
 }
 
 /// `JDE = JD + ΔT / 86_400`. Equation 5.
@@ -387,5 +401,29 @@ mod tests {
                 .to_string()
                 .contains("1582")
         );
+    }
+    #[test]
+    fn negative_julian_days_preserve_dates_and_nonnegative_time_fractions() {
+        for year in [-262_142_i32, -10_000_i32, -5000_i32] {
+            let date = Utc.with_ymd_and_hms(year, 3, 1, 12, 34, 56).unwrap();
+            let jd = julian_day(&SpaDateTime::new(date));
+            assert_eq!(
+                calendar_date_from_julian_day(jd, chrono_tz::UTC)
+                    .unwrap()
+                    .naive_utc(),
+                date.naive_utc()
+            );
+        }
+    }
+
+    #[test]
+    fn calendar_projection_rejects_missing_local_calendar_labels() {
+        for date in [
+            Utc.with_ymd_and_hms(1582, 10, 4, 20, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(-1000, 2, 28, 20, 0, 0).unwrap(),
+        ] {
+            let jd = julian_day(&SpaDateTime::new(date));
+            assert!(calendar_date_from_julian_day(jd, chrono_tz::Asia::Tokyo).is_none());
+        }
     }
 }
