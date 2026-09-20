@@ -4,23 +4,56 @@
 
 //! Time inputs for the SPA pipeline.
 
-use chrono::{DateTime, TimeZone};
+use chrono::{DateTime, Datelike, TimeZone};
 use thiserror::Error;
 
 /// IERS bound on `|DUT1| < 1 s` (leap seconds keep UT1 within this band).
 const DUT1_LIMIT_SECONDS: f64 = 1.0;
 
-/// Invalid UT1 correction for a civil instant.
+/// Earliest UTC year covered by the SPA model.
+pub const MIN_SPA_YEAR: i32 = -2000;
+/// Latest UTC year covered by the SPA model.
+pub const MAX_SPA_YEAR: i32 = 6000;
+/// One day bounds the TT shift while retaining the polynomial estimates
+/// throughout the SPA year range, including ancient dates.
+pub const MAX_ABS_DELTA_T_SECONDS: f64 = 86_400.0;
+
+/// Invalid time input or unrepresentable solar event.
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum SpaTimeError {
     /// DUT1 is non-finite or outside the open interval (-1, 1) seconds.
     #[error("DUT1 must lie in the open interval (-1, 1) s, got {0}")]
     Dut1OutOfRange(f64),
+    /// UTC year lies outside the SPA model's supported interval.
+    #[error("UTC year {0} must lie in [-2000, 6000]")]
+    YearOutOfRange(i32),
+    /// Delta T is non-finite or exceeds one day in magnitude.
+    #[error("delta T {0} s must be finite and lie in [-86400, 86400]")]
+    DeltaTOutOfRange(f64),
+    /// An event lies outside the bounded search interval or date range.
+    #[error("solar event is outside the representable date or search interval")]
+    EventOutOfRange,
+}
+
+pub(crate) fn validate_spa_time<Tz: TimeZone>(
+    datetime: &SpaDateTime<Tz>,
+    delta_t: f64,
+) -> Result<(), SpaTimeError> {
+    let year = datetime.datetime().naive_utc().year();
+    if !(MIN_SPA_YEAR..=MAX_SPA_YEAR).contains(&year) {
+        return Err(SpaTimeError::YearOutOfRange(year));
+    }
+    if !(-MAX_ABS_DELTA_T_SECONDS..=MAX_ABS_DELTA_T_SECONDS).contains(&delta_t) {
+        return Err(SpaTimeError::DeltaTOutOfRange(delta_t));
+    }
+    Ok(())
 }
 
 /// Instant tagged with `DUT1 = UT1 − UTC` (seconds).
 ///
 /// Default DUT1 is `0`. Use [`Self::try_new`] to attach an IERS value.
+/// This wrapper accepts Chrono's date range for calendar conversions.
+/// The solar orchestrators separately enforce the SPA year and delta-T limits.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpaDateTime<Tz: TimeZone> {
     datetime: DateTime<Tz>,
@@ -116,15 +149,10 @@ mod tests {
     }
 
     #[test]
-    #[expect(
-        clippy::float_cmp,
-        reason = "These cases require exact preservation of stored values or exact boundary results."
-    )]
     fn try_with_dut1_rejects_boundary_and_beyond() {
         for dut1 in [-1.5_f64, -1.0_f64, 1.0_f64, 1.5_f64] {
-            let SpaTimeError::Dut1OutOfRange(reported) =
-                SpaDateTime::new(dt()).try_with_dut1(dut1).unwrap_err();
-            assert_eq!(reported, dut1);
+            let error = SpaDateTime::new(dt()).try_with_dut1(dut1).unwrap_err();
+            assert_eq!(error, SpaTimeError::Dut1OutOfRange(dut1));
         }
     }
 
@@ -168,5 +196,76 @@ mod tests {
         let retargeted = original.with_datetime(new_instant);
         assert_eq!(retargeted.dut1(), 0.25_f64);
         assert_eq!(retargeted.datetime(), &new_instant);
+    }
+
+    #[test]
+    fn solar_orchestrators_reject_unsupported_dates_and_non_finite_delta_t() {
+        use crate::{Observer, SolarDay, SolarPosition};
+
+        let observer = Observer::try_at_sea_level_isa(0.0, -179.0).unwrap();
+        for invalid in [DateTime::<Utc>::MIN_UTC, DateTime::<Utc>::MAX_UTC] {
+            let datetime = SpaDateTime::new(invalid);
+            assert!(matches!(
+                SolarPosition::compute(&datetime, observer),
+                Err(SpaTimeError::YearOutOfRange(_))
+            ));
+            assert!(matches!(
+                SolarDay::compute(&datetime, observer),
+                Err(SpaTimeError::YearOutOfRange(_))
+            ));
+        }
+        let datetime = SpaDateTime::new(dt());
+        for delta_t in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            -86_400.001_f64,
+            86_400.001_f64,
+        ] {
+            assert!(matches!(
+                SolarPosition::compute_with_delta_t(&datetime, delta_t, observer),
+                Err(SpaTimeError::DeltaTOutOfRange(_))
+            ));
+            assert!(matches!(
+                SolarDay::compute_with_delta_t(&datetime, delta_t, observer),
+                Err(SpaTimeError::DeltaTOutOfRange(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn solar_position_supports_the_model_endpoints_and_polynomial_delta_t() {
+        use crate::{Observer, SolarPosition};
+
+        let observer = Observer::try_at_sea_level_isa(0.0, 0.0).unwrap();
+        for year in [MIN_SPA_YEAR, MAX_SPA_YEAR] {
+            let datetime = SpaDateTime::new(Utc.with_ymd_and_hms(year, 1, 1, 12, 0, 0).unwrap());
+            assert!(
+                SolarPosition::compute(&datetime, observer)
+                    .unwrap()
+                    .topocentric_zenith
+                    .is_finite()
+            );
+            for delta_t in [-MAX_ABS_DELTA_T_SECONDS, MAX_ABS_DELTA_T_SECONDS] {
+                assert!(
+                    SolarPosition::compute_with_delta_t(&datetime, delta_t, observer)
+                        .unwrap()
+                        .topocentric_azimuth
+                        .is_finite()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn time_errors_describe_the_invalid_quantity() {
+        for (error, word) in [
+            (SpaTimeError::Dut1OutOfRange(1.0), "DUT1"),
+            (SpaTimeError::YearOutOfRange(6001), "year"),
+            (SpaTimeError::DeltaTOutOfRange(f64::NAN), "delta T"),
+            (SpaTimeError::EventOutOfRange, "event"),
+        ] {
+            assert!(error.to_string().contains(word));
+        }
     }
 }

@@ -29,9 +29,10 @@ high-precision solar calculations, faithful to Reda & Andreas,
 - **Timezone-aware civil days** — inputs are `chrono` datetimes in any
   timezone; [`SolarDay`] anchors on the input's local civil date and renders
   events back in the same timezone, handling DST gaps and overlaps.
-- **Valid by construction** — [`Observer`], [`Surface`] and [`SpaDateTime`]
-  validate their domains at the boundary, so the numeric pipeline itself is
-  infallible. Unsafe code is denied in `Cargo.toml`, with 100% branch coverage.
+- **Validated inputs**: [`Observer`], [`Surface`] and [`SpaDateTime`] validate
+  site, surface and DUT1 inputs. Solar computations return `Result`, rejecting
+  UTC years outside -2000 to 6000 and non-finite or greater-than-one-day ΔT.
+  Unsafe code is forbidden in `Cargo.toml`, with 100% branch coverage.
 
 [`SolarPosition`]: https://docs.rs/helioxide/latest/helioxide/spa/struct.SolarPosition.html
 [`SolarPosition::compute`]: https://docs.rs/helioxide/latest/helioxide/spa/struct.SolarPosition.html#method.compute
@@ -54,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Topocentric solar position with the paper's ΔT = 67 s pinned;
     // `SolarPosition::compute` resolves ΔT automatically instead.
-    let position = SolarPosition::compute_with_delta_t(&datetime, 67.0, observer);
+    let position = SolarPosition::compute_with_delta_t(&datetime, 67.0, observer)?;
     assert!((position.topocentric_zenith - 50.11162).abs() < 1e-4);
     assert!((position.topocentric_azimuth - 194.34024).abs() < 1e-4);
 
@@ -65,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Sunrise, solar noon and sunset on the civil day of the input,
     // `None` on polar day or polar night.
-    let day = SolarDay::compute_with_delta_t(&datetime, 67.0, observer);
+    let day = SolarDay::compute_with_delta_t(&datetime, 67.0, observer)?;
     assert!(day.sunrise.unwrap() < day.transit);
     assert!(day.transit < day.sunset.unwrap());
     Ok(())
