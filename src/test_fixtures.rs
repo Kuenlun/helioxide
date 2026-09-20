@@ -29,31 +29,31 @@ use chrono::{TimeZone, Utc};
 /// Reconstructed from the civil instant rather than the report's six-decimal
 /// printed value, which loses ~2e-7 d that `L1 ≈ 6e11` amplifies into the
 /// trailing decimals.
-pub fn reference_jd() -> f64 {
+pub(crate) fn reference_jd() -> f64 {
     let utc = Utc.with_ymd_and_hms(2003, 10, 17, 19, 30, 30).unwrap();
     julian_day(&SpaDateTime::new(utc))
 }
 
 /// JCE for Table A5.1 with ΔT = 67 s.
-pub fn reference_jce() -> f64 {
+pub(crate) fn reference_jce() -> f64 {
     let jde = julian_ephemeris_day(reference_jd(), 67.0);
     julian_ephemeris_century(jde)
 }
 
 /// JME for Table A5.1.
-pub fn reference_jme() -> f64 {
+pub(crate) fn reference_jme() -> f64 {
     julian_ephemeris_millennium(reference_jce())
 }
 
 /// Reference observer site from appendix A.5.
-pub const REFERENCE_LATITUDE_DEGREES: f64 = 39.742_476;
-pub const REFERENCE_LONGITUDE_DEGREES: f64 = -105.178_6;
-pub const REFERENCE_ELEVATION_METRES: f64 = 1830.14;
-pub const REFERENCE_PRESSURE_MILLIBARS: f64 = 820.0;
-pub const REFERENCE_TEMPERATURE_CELSIUS: f64 = 11.0;
+pub(crate) const REFERENCE_LATITUDE_DEGREES: f64 = 39.742_476;
+pub(crate) const REFERENCE_LONGITUDE_DEGREES: f64 = -105.178_6;
+pub(crate) const REFERENCE_ELEVATION_METRES: f64 = 1830.14;
+pub(crate) const REFERENCE_PRESSURE_MILLIBARS: f64 = 820.0;
+pub(crate) const REFERENCE_TEMPERATURE_CELSIUS: f64 = 11.0;
 
 /// `(δ', H')` at the Table A5.1 reference instant.
-pub fn reference_delta_prime_and_h_prime() -> (f64, f64) {
+pub(crate) fn reference_delta_prime_and_h_prime() -> (f64, f64) {
     let jd = reference_jd();
     let jce = reference_jce();
     let jme = reference_jme();
@@ -86,13 +86,13 @@ pub fn reference_delta_prime_and_h_prime() -> (f64, f64) {
 }
 
 /// `e₀` at the Table A5.1 reference instant.
-pub fn reference_elevation_without_refraction() -> f64 {
+pub(crate) fn reference_elevation_without_refraction() -> f64 {
     let (delta_prime, h_prime) = reference_delta_prime_and_h_prime();
     topocentric_elevation_without_refraction(REFERENCE_LATITUDE_DEGREES, delta_prime, h_prime)
 }
 
 /// `(θ, Γ)` at the Table A5.1 reference instant.
-pub fn reference_theta_and_gamma() -> (f64, f64) {
+pub(crate) fn reference_theta_and_gamma() -> (f64, f64) {
     let (delta_prime, h_prime) = reference_delta_prime_and_h_prime();
     let e0 =
         topocentric_elevation_without_refraction(REFERENCE_LATITUDE_DEGREES, delta_prime, h_prime);

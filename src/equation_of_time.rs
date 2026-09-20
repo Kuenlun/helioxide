@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn sun_mean_longitude_matches_table_a5_1() {
         let m = sun_mean_longitude(reference_jme());
-        assert!((m - 205.897_172_251_6).abs() < 1e-6);
+        assert!((m - 205.897_172_251_6).abs() < 1e-6_f64);
     }
 
     #[test]
@@ -104,9 +104,11 @@ mod tests {
 
     #[test]
     fn sun_mean_longitude_wraps_into_zero_360() {
-        for &jme in &[-4.0, -1.0, -1e-3, 0.0, 1e-3, 1.0, 4.0] {
+        for &jme in &[
+            -4.0_f64, -1.0_f64, -1e-3_f64, 0.0_f64, 1e-3_f64, 1.0_f64, 4.0_f64,
+        ] {
             let m = sun_mean_longitude(jme);
-            assert!((0.0..360.0).contains(&m));
+            assert!((0.0_f64..360.0_f64).contains(&m));
         }
     }
 
@@ -114,37 +116,37 @@ mod tests {
     fn equation_of_time_matches_table_a5_1() {
         let (m, alpha, delta_psi, epsilon) = reference_inputs();
         let e = equation_of_time(m, alpha, delta_psi, epsilon);
-        assert!((e - 14.641_503).abs() < 1e-4);
+        assert!((e - 14.641_503).abs() < 1e-4_f64);
     }
 
     #[test]
     fn equation_of_time_collapses_to_correction_when_m_equals_alpha() {
-        let expected = -APPARENT_MEAN_LONGITUDE_CORRECTION_DEGREES * 4.0;
-        for &v in &[0.0_f64, 90.0, 200.0] {
+        let expected = -APPARENT_MEAN_LONGITUDE_CORRECTION_DEGREES * 4.0_f64;
+        for &v in &[0.0_f64, 90.0_f64, 200.0_f64] {
             let e = equation_of_time(v, v, 0.0, 23.44);
-            assert!((e - expected).abs() < 1e-13);
+            assert!((e - expected).abs() < 1e-13_f64);
         }
     }
 
     #[test]
     fn equation_of_time_is_linear_in_m_and_alpha() {
         let baseline = equation_of_time(100.0, 99.0, 0.0, 23.44);
-        for &d in &[-1.0_f64, -1e-3, 1e-6, 0.5] {
+        for &d in &[-1.0_f64, -1e-3_f64, 1e-6_f64, 0.5_f64] {
             let from_m = equation_of_time(100.0 + d, 99.0, 0.0, 23.44);
             let from_alpha = equation_of_time(100.0, 99.0 + d, 0.0, 23.44);
-            assert!(4.0_f64.mul_add(-d, from_m - baseline).abs() < 1e-12);
-            assert!(4.0_f64.mul_add(d, from_alpha - baseline).abs() < 1e-12);
+            assert!(4.0_f64.mul_add(-d, from_m - baseline).abs() < 1e-12_f64);
+            assert!(4.0_f64.mul_add(d, from_alpha - baseline).abs() < 1e-12_f64);
         }
     }
 
     #[test]
     fn equation_of_time_scales_delta_psi_by_cos_epsilon() {
-        for &eps in &[0.0_f64, 23.44, 60.0] {
+        for &eps in &[0.0_f64, 23.44_f64, 60.0_f64] {
             let baseline = equation_of_time(100.0, 99.0, 0.0, eps);
             let cos_eps = eps.to_radians().cos();
-            for &d in &[-1e-3_f64, 1e-6, 0.5] {
+            for &d in &[-1e-3_f64, 1e-6_f64, 0.5_f64] {
                 let shifted = equation_of_time(100.0, 99.0, d, eps);
-                assert!((4.0 * d).mul_add(-cos_eps, shifted - baseline).abs() < 1e-12);
+                assert!((4.0 * d).mul_add(-cos_eps, shifted - baseline).abs() < 1e-12_f64);
             }
         }
     }
@@ -152,13 +154,15 @@ mod tests {
     #[test]
     fn equation_of_time_clamps_overshoot_by_one_revolution() {
         let positive = equation_of_time(358.0, 1.0, 0.0, 23.44);
-        let positive_raw = 4.0 * (358.0 - 1.0 - APPARENT_MEAN_LONGITUDE_CORRECTION_DEGREES);
-        assert!(positive_raw.abs() > 20.0);
-        assert!((positive - (positive_raw - 1440.0)).abs() < 1e-12);
+        let positive_raw =
+            4.0_f64 * (358.0_f64 - 1.0_f64 - APPARENT_MEAN_LONGITUDE_CORRECTION_DEGREES);
+        assert!(positive_raw.abs() > 20.0_f64);
+        assert!((positive - (positive_raw - 1440.0)).abs() < 1e-12_f64);
 
         let negative = equation_of_time(1.0, 358.0, 0.0, 23.44);
-        let negative_raw = 4.0 * (1.0 - 358.0 - APPARENT_MEAN_LONGITUDE_CORRECTION_DEGREES);
-        assert!(negative_raw.abs() > 20.0);
-        assert!((negative - (negative_raw + 1440.0)).abs() < 1e-12);
+        let negative_raw =
+            4.0_f64 * (1.0_f64 - 358.0_f64 - APPARENT_MEAN_LONGITUDE_CORRECTION_DEGREES);
+        assert!(negative_raw.abs() > 20.0_f64);
+        assert!((negative - (negative_raw + 1440.0)).abs() < 1e-12_f64);
     }
 }

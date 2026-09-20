@@ -74,7 +74,7 @@ pub fn sunrise_sunset_local_hour_angle(
     let sin_h0 = sun_horizon_elevation.to_radians().sin();
 
     let argument = (-sin_phi).mul_add(sin_delta, sin_h0) / (cos_phi * cos_delta);
-    if !(-1.0..=1.0).contains(&argument) {
+    if !(-1.0_f64..=1.0_f64).contains(&argument) {
         return None;
     }
     Some(argument.acos().to_degrees())
@@ -199,7 +199,6 @@ pub fn sun_transit_time(
 /// sunrise and `i = 2` for sunset per step A.2.15.
 #[inline]
 #[must_use]
-#[allow(clippy::too_many_arguments)]
 pub fn sunrise_or_sunset_time(
     approximate_event_time: f64,
     sun_altitude_at_event: f64,
@@ -221,8 +220,11 @@ pub fn sunrise_or_sunset_time(
 /// is always populated.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SolarDay<Tz: TimeZone> {
+    /// Solar noon in the input timezone.
     pub transit: DateTime<Tz>,
+    /// Sunrise in the input timezone, absent during polar day or night.
     pub sunrise: Option<DateTime<Tz>>,
+    /// Sunset in the input timezone, absent during polar day or night.
     pub sunset: Option<DateTime<Tz>>,
     /// Sun altitude at transit (degrees, in `[-90°, 90°]`). Equation A12.
     pub sun_transit_altitude: f64,
@@ -258,7 +260,10 @@ impl<Tz: TimeZone> SolarDay<Tz> {
     /// Compute the same sunrise, transit and sunset readout as [`Self::compute`]
     /// with an explicit `ΔT = TT − UT1` (seconds).
     #[must_use]
-    #[allow(clippy::many_single_char_names, clippy::similar_names)]
+    #[expect(
+        clippy::similar_names,
+        reason = "Keep the parameter names and grouping used by the SPA equations."
+    )]
     pub fn compute_with_delta_t(
         datetime: &SpaDateTime<Tz>,
         delta_t_seconds: f64,
@@ -332,18 +337,26 @@ impl<Tz: TimeZone> SolarDay<Tz> {
         // Wrap T into [0, 1) and unwrap R, S to the closest representative
         // around T, preserving sunrise < transit < sunset across day boundaries.
         let transit_wrapped = transit_event.fraction_of_day.rem_euclid(1.0);
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "Solar events add at most an adjacent day; Chrono enforces its representable date range."
+        )]
         let to_datetime = |fraction_of_day: f64| -> DateTime<Tz> {
             // Round to whole milliseconds: appendix A.2 publishes to 0.01 s.
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::as_conversions,
+                reason = "The SPA equations round or truncate floating-point calendar components before validation."
+            )]
             let milliseconds = (fraction_of_day * (SECONDS_PER_DAY * 1000.0)).round() as i64;
             (utc_anchor + TimeDelta::milliseconds(milliseconds)).with_timezone(&tz)
         };
         let unwrap_to_transit = |fraction: f64| -> f64 {
             let raw = fraction - transit_wrapped;
-            if raw > 0.5 {
-                fraction - 1.0
-            } else if raw < -0.5 {
-                fraction + 1.0
+            if raw > 0.5_f64 {
+                fraction - 1.0_f64
+            } else if raw < -0.5_f64 {
+                fraction + 1.0_f64
             } else {
                 fraction
             }
@@ -406,7 +419,10 @@ struct RefinedEvent {
     interpolated_declination: f64,
 }
 
-#[allow(clippy::similar_names, clippy::too_many_arguments)]
+#[expect(
+    clippy::similar_names,
+    reason = "Keep the parameter names and grouping used by the SPA equations."
+)]
 fn refined_event_fraction_of_day(
     kind: EventKind,
     approximate_event_time: f64,
@@ -463,8 +479,8 @@ fn local_civil_midnight_in_utc<Tz: TimeZone>(datetime: &DateTime<Tz>) -> DateTim
 
 /// `(α, δ)` (degrees) at the given Julian Ephemeris Day.
 fn right_ascension_and_declination(julian_ephemeris_day: f64) -> (f64, f64) {
-    let jce = (julian_ephemeris_day - J2000_EPOCH_JD) / 36_525.0;
-    let jme = jce / 10.0;
+    let jce = (julian_ephemeris_day - J2000_EPOCH_JD) / 36_525.0_f64;
+    let jme = jce / 10.0_f64;
 
     let l = earth_heliocentric_longitude(jme);
     let b = earth_heliocentric_latitude(jme);
@@ -515,7 +531,7 @@ mod tests {
                 self.remaining = 0;
                 Err(core::fmt::Error)
             } else {
-                self.remaining -= s.len();
+                self.remaining = self.remaining.saturating_sub(s.len());
                 Ok(())
             }
         }
@@ -545,7 +561,11 @@ mod tests {
     }
 
     fn fraction_to_clock_seconds(fraction_of_day: f64) -> i64 {
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::as_conversions,
+            reason = "The SPA equations round or truncate floating-point calendar components before validation."
+        )]
         {
             (fraction_of_day * 86_400.0).round() as i64
         }
@@ -713,18 +733,18 @@ mod tests {
     #[test]
     fn approximate_sun_transit_time_is_linear_inside_range() {
         let baseline = approximate_sun_transit_time(200.0, -50.0, 50.0);
-        for &d in &[-1.0_f64, -1e-3, 1e-6, 0.5] {
+        for &d in &[-1.0_f64, -1e-3_f64, 1e-6_f64, 0.5_f64] {
             assert!(
                 (approximate_sun_transit_time(200.0 + d, -50.0, 50.0) - baseline - d / 360.0).abs()
-                    < 1e-13,
+                    < 1e-13_f64,
             );
             assert!(
                 (approximate_sun_transit_time(200.0, -50.0 + d, 50.0) - baseline + d / 360.0).abs()
-                    < 1e-13,
+                    < 1e-13_f64,
             );
             assert!(
                 (approximate_sun_transit_time(200.0, -50.0, 50.0 + d) - baseline + d / 360.0).abs()
-                    < 1e-13,
+                    < 1e-13_f64,
             );
         }
     }
@@ -732,13 +752,13 @@ mod tests {
     #[test]
     fn approximate_sun_transit_time_wraps_into_unit_interval() {
         for &(alpha, sigma, nu) in &[
-            (0.0_f64, 0.0, 0.0),
-            (-720.0, 0.0, 0.0),
-            (720.0, 0.0, 0.0),
-            (0.0, 360.0, 0.0),
+            (0.0_f64, 0.0_f64, 0.0_f64),
+            (-720.0_f64, 0.0_f64, 0.0_f64),
+            (720.0_f64, 0.0_f64, 0.0_f64),
+            (0.0_f64, 360.0_f64, 0.0_f64),
         ] {
             let m_0 = approximate_sun_transit_time(alpha, sigma, nu);
-            assert!((0.0..1.0).contains(&m_0));
+            assert!((0.0_f64..1.0_f64).contains(&m_0));
         }
     }
 
@@ -762,130 +782,147 @@ mod tests {
             .sin()
             .acos()
             .to_degrees();
-        assert!((h0 - expected).abs() < 1e-12);
+        assert!((h0 - expected).abs() < 1e-12_f64);
     }
 
     #[test]
     fn approximate_sunrise_and_sunset_are_symmetric_in_h0() {
         let baseline_sunrise = approximate_sunrise_time(0.5, 90.0);
         let baseline_sunset = approximate_sunset_time(0.5, 90.0);
-        for &d in &[-1.0_f64, -1e-3, 1e-6, 1.0] {
+        for &d in &[-1.0_f64, -1e-3_f64, 1e-6_f64, 1.0_f64] {
             assert!(
                 (approximate_sunrise_time(0.5, 90.0 + d) - baseline_sunrise + d / 360.0).abs()
-                    < 1e-13,
+                    < 1e-13_f64,
             );
             assert!(
                 (approximate_sunset_time(0.5, 90.0 + d) - baseline_sunset - d / 360.0).abs()
-                    < 1e-13,
+                    < 1e-13_f64,
             );
         }
     }
 
     #[test]
     fn approximate_sunrise_and_sunset_wrap_into_unit_interval() {
-        for &(m_0, h_0) in &[(0.05_f64, 90.0_f64), (0.95, 90.0), (0.0, 360.0)] {
-            assert!((0.0..1.0).contains(&approximate_sunrise_time(m_0, h_0)));
-            assert!((0.0..1.0).contains(&approximate_sunset_time(m_0, h_0)));
+        for &(m_0, h_0) in &[
+            (0.05_f64, 90.0_f64),
+            (0.95_f64, 90.0_f64),
+            (0.0_f64, 360.0_f64),
+        ] {
+            assert!((0.0_f64..1.0_f64).contains(&approximate_sunrise_time(m_0, h_0)));
+            assert!((0.0_f64..1.0_f64).contains(&approximate_sunset_time(m_0, h_0)));
         }
     }
 
     #[test]
     fn sidereal_time_at_event_advances_by_diurnal_rate() {
-        for &m in &[0.0_f64, 0.25, 0.5, 1.0] {
+        for &m in &[0.0_f64, 0.25_f64, 0.5_f64, 1.0_f64] {
             let actual = sidereal_time_at_event(100.0, m);
             let expected = EARTH_SIDEREAL_DAILY_ROTATION_DEGREES.mul_add(m, 100.0);
-            assert!((actual - expected).abs() < 1e-12);
+            assert!((actual - expected).abs() < 1e-12_f64);
         }
     }
 
     #[test]
     fn delta_t_corrected_event_time_adds_seconds_per_day_offset() {
-        for &m in &[0.0_f64, 0.5, 0.999] {
-            assert!((delta_t_corrected_event_time(m, 67.0) - (m + 67.0 / 86_400.0)).abs() < 1e-15);
+        for &m in &[0.0_f64, 0.5_f64, 0.999_f64] {
+            assert!(
+                (delta_t_corrected_event_time(m, 67.0) - (m + 67.0 / 86_400.0)).abs() < 1e-15_f64
+            );
         }
     }
 
     #[test]
     fn interpolate_three_day_value_passes_through_each_node() {
-        for &(n, expected) in &[(-1.0_f64, 10.0), (0.0, 11.0), (1.0, 12.0)] {
-            assert!((interpolate_three_day_value(10.0, 11.0, 12.0, n) - expected).abs() < 1e-12);
+        for &(n, expected) in &[
+            (-1.0_f64, 10.0_f64),
+            (0.0_f64, 11.0_f64),
+            (1.0_f64, 12.0_f64),
+        ] {
+            assert!(
+                (interpolate_three_day_value(10.0, 11.0, 12.0, n) - expected).abs() < 1e-12_f64
+            );
         }
     }
 
     #[test]
     fn interpolate_three_day_value_collapses_to_linear_for_constant_difference() {
-        for &n in &[-0.7_f64, -0.1, 0.3, 0.99] {
+        for &n in &[-0.7_f64, -0.1_f64, 0.3_f64, 0.99_f64] {
             let actual = interpolate_three_day_value(0.0, 1.0, 2.0, n);
-            assert!((actual - n.mul_add(1.0, 1.0)).abs() < 1e-12);
+            assert!((actual - n.mul_add(1.0, 1.0)).abs() < 1e-12_f64);
         }
     }
 
     #[test]
     fn interpolate_three_day_value_recovers_second_difference() {
         // (0, 1, 4): a=1, b=3, c=2. At n=0.5: 1 + 0.5·(1+3+2·0.5)/2 = 2.25.
-        assert!((interpolate_three_day_value(0.0, 1.0, 4.0, 0.5) - 2.25).abs() < 1e-12);
+        assert!((interpolate_three_day_value(0.0, 1.0, 4.0, 0.5) - 2.25).abs() < 1e-12_f64);
     }
 
     #[test]
     fn interpolate_three_day_value_wraps_360_degree_difference() {
         // (358, 1, 4) simulates the vernal-equinox α roll-over.
-        assert!((interpolate_three_day_value(358.0, 1.0, 4.0, 0.0) - 1.0).abs() < 1e-12);
-        assert!((interpolate_three_day_value(358.0, 1.0, 4.0, 0.5) - 2.5).abs() < 1e-12);
+        assert!((interpolate_three_day_value(358.0, 1.0, 4.0, 0.0) - 1.0).abs() < 1e-12_f64);
+        assert!((interpolate_three_day_value(358.0, 1.0, 4.0, 0.5) - 2.5).abs() < 1e-12_f64);
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn wrap_interpolation_difference_threshold() {
-        for &diff in &[-2.0_f64, -1.5, -1e-6, 0.0, 1e-6, 1.5, 2.0] {
+        for &diff in &[
+            -2.0_f64, -1.5_f64, -1e-6_f64, 0.0_f64, 1e-6_f64, 1.5_f64, 2.0_f64,
+        ] {
             assert_eq!(wrap_interpolation_difference(diff), diff);
         }
-        assert!((wrap_interpolation_difference(-359.0) - 1.0).abs() < 1e-12);
-        assert!((wrap_interpolation_difference(361.0) - 1.0).abs() < 1e-12);
+        assert!((wrap_interpolation_difference(-359.0) - 1.0).abs() < 1e-12_f64);
+        assert!((wrap_interpolation_difference(361.0) - 1.0).abs() < 1e-12_f64);
     }
 
     #[test]
     fn event_local_hour_angle_wraps_into_signed_180() {
         for &(nu, sigma, alpha) in &[
-            (0.0_f64, 0.0, 0.0),
-            (300.0, 0.0, 0.0),
-            (60.0, 0.0, 0.0),
-            (-300.0, 0.0, 0.0),
-            (1080.0, 0.0, 0.0),
+            (0.0_f64, 0.0_f64, 0.0_f64),
+            (300.0_f64, 0.0_f64, 0.0_f64),
+            (60.0_f64, 0.0_f64, 0.0_f64),
+            (-300.0_f64, 0.0_f64, 0.0_f64),
+            (1_080.0_f64, 0.0_f64, 0.0_f64),
         ] {
             let h_prime = event_local_hour_angle(nu, sigma, alpha);
-            assert!(h_prime > -180.0 && h_prime <= 180.0);
+            assert!(h_prime > -180.0_f64 && h_prime <= 180.0_f64);
         }
     }
 
     #[test]
     fn event_local_hour_angle_wraps_300_to_minus_60() {
-        assert!((event_local_hour_angle(300.0, 0.0, 0.0) - -60.0).abs() < 1e-12);
-        assert!((event_local_hour_angle(-300.0, 0.0, 0.0) - 60.0).abs() < 1e-12);
+        assert!((event_local_hour_angle(300.0, 0.0, 0.0) - -60.0).abs() < 1e-12_f64);
+        assert!((event_local_hour_angle(-300.0, 0.0, 0.0) - 60.0).abs() < 1e-12_f64);
     }
 
     #[test]
     fn sun_altitude_at_event_reduces_at_meridian() {
         // At H' = 0: arcsin(cos(φ - δ)) = 90° - |φ - δ|.
         let altitude = sun_altitude_at_event(40.0, -10.0, 0.0);
-        assert!((altitude - (90.0_f64 - 50.0_f64.abs())).abs() < 1e-12);
+        assert!((altitude - (90.0_f64 - 50.0_f64.abs())).abs() < 1e-12_f64);
     }
 
     #[test]
     fn sun_transit_time_corrects_m0() {
         let baseline = sun_transit_time(0.5, 0.0);
-        for &d in &[-180.0_f64, -1.0, 1e-3, 90.0] {
-            assert!((sun_transit_time(0.5, d) - (baseline - d / 360.0)).abs() < 1e-13);
+        for &d in &[-180.0_f64, -1.0_f64, 1e-3_f64, 90.0_f64] {
+            assert!((sun_transit_time(0.5, d) - (baseline - d / 360.0)).abs() < 1e-13_f64);
         }
     }
 
     #[test]
     fn sunrise_or_sunset_time_collapses_when_residual_altitude_vanishes() {
         for &(delta, phi, h_prime) in &[
-            (-10.0_f64, 40.0, 80.0),
-            (5.0, -30.0, -90.0),
-            (0.0, 0.0, 90.0),
+            (-10.0_f64, 40.0_f64, 80.0_f64),
+            (5.0_f64, -30.0_f64, -90.0_f64),
+            (0.0_f64, 0.0_f64, 90.0_f64),
         ] {
-            let m = 0.25;
+            let m = 0.25_f64;
             let result = sunrise_or_sunset_time(
                 m,
                 SUN_ELEVATION_AT_HORIZON_DEGREES,
@@ -894,16 +931,16 @@ mod tests {
                 phi,
                 h_prime,
             );
-            assert!((result - m).abs() < 1e-13);
+            assert!((result - m).abs() < 1e-13_f64);
         }
     }
 
     #[test]
     fn sunrise_or_sunset_time_scales_residual_by_one_over_360() {
         // (δ=0, φ=0, H'=90°): denominator = 360. Residual +1° → +1/360 day.
-        let m = 0.25;
+        let m = 0.25_f64;
         let result = sunrise_or_sunset_time(m, 1.0, 0.0, 0.0, 0.0, 90.0);
-        assert!((result - (m + 1.0 / 360.0)).abs() < 1e-13);
+        assert!((result - (m + 1.0 / 360.0)).abs() < 1e-13_f64);
     }
 
     #[test]
@@ -911,12 +948,15 @@ mod tests {
         let jd = julian::julian_day(&reference_datetime());
         let jde = julian::julian_ephemeris_day(jd, REFERENCE_DELTA_T_SECONDS);
         let (alpha, delta) = right_ascension_and_declination(jde);
-        assert!((alpha - 202.227_41).abs() < 1e-4);
-        assert!((delta - -9.314_34).abs() < 1e-4);
+        assert!((alpha - 202.227_41).abs() < 1e-4_f64);
+        assert!((delta - -9.314_34).abs() < 1e-4_f64);
     }
 
     #[test]
-    #[allow(clippy::similar_names)]
+    #[expect(
+        clippy::similar_names,
+        reason = "Keep the parameter names and grouping used by the SPA equations."
+    )]
     fn refined_event_fraction_dispatches_on_event_kind() {
         let observer = reference_observer();
         let utc_midnight = SpaDateTime::new(Utc.with_ymd_and_hms(2003, 10, 17, 0, 0, 0).unwrap());
@@ -986,10 +1026,10 @@ mod tests {
             1_219
         ));
 
-        assert!(transit.local_hour_angle.abs() < 0.1);
-        assert!(sunrise.local_hour_angle < 0.0);
-        assert!(sunset.local_hour_angle > 0.0);
-        assert!((transit.interpolated_declination - delta_zero).abs() < 1.0);
+        assert!(transit.local_hour_angle.abs() < 0.1_f64);
+        assert!(sunrise.local_hour_angle < 0.0_f64);
+        assert!(sunset.local_hour_angle > 0.0_f64);
+        assert!((transit.interpolated_declination - delta_zero).abs() < 1.0_f64);
     }
 
     #[test]
@@ -1048,8 +1088,8 @@ mod tests {
                 sunrise: Some(transit - chrono::TimeDelta::hours(6)),
                 sunset: Some(transit + chrono::TimeDelta::hours(6)),
                 sun_transit_altitude: 65.0,
-                sunrise_hour_angle: Some(-90.0),
-                sunset_hour_angle: Some(90.0),
+                sunrise_hour_angle: Some(-90.0_f64),
+                sunset_hour_angle: Some(90.0_f64),
             },
             SolarDay::<Utc> {
                 transit,
@@ -1057,14 +1097,14 @@ mod tests {
                 sunset: Some(transit + chrono::TimeDelta::hours(6)),
                 sun_transit_altitude: 65.0,
                 sunrise_hour_angle: None,
-                sunset_hour_angle: Some(90.0),
+                sunset_hour_angle: Some(90.0_f64),
             },
             SolarDay::<Utc> {
                 transit,
                 sunrise: Some(transit - chrono::TimeDelta::hours(6)),
                 sunset: None,
                 sun_transit_altitude: 65.0,
-                sunrise_hour_angle: Some(-90.0),
+                sunrise_hour_angle: Some(-90.0_f64),
                 sunset_hour_angle: None,
             },
             SolarDay::<Utc> {

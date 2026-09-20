@@ -25,20 +25,24 @@ pub fn julian_day<Tz: TimeZone>(datetime: &SpaDateTime<Tz>) -> f64 {
     let dt = datetime.datetime().naive_utc();
 
     let seconds_of_minute =
-        f64::from(dt.second()) + f64::from(dt.nanosecond()) / 1.0e9 + datetime.dut1();
+        f64::from(dt.second()) + f64::from(dt.nanosecond()) / 1.0e9_f64 + datetime.dut1();
     let day_decimal = f64::from(dt.day())
-        + (f64::from(dt.hour()) + (f64::from(dt.minute()) + seconds_of_minute / 60.0) / 60.0)
-            / 24.0;
+        + (f64::from(dt.hour())
+            + (f64::from(dt.minute()) + seconds_of_minute / 60.0_f64) / 60.0_f64)
+            / 24.0_f64;
 
     // January and February count as months 13 and 14 of the previous year.
     let (year, month) = if dt.month() < 3 {
-        (f64::from(dt.year() - 1), f64::from(dt.month() + 12))
+        (
+            f64::from(dt.year()) - 1.0_f64,
+            f64::from(dt.month()) + 12.0_f64,
+        )
     } else {
         (f64::from(dt.year()), f64::from(dt.month()))
     };
 
     let julian_day =
-        int(365.25 * (year + 4716.0)) + int(30.6001 * (month + 1.0)) + (day_decimal - 1524.5);
+        int(365.25 * (year + 4716.0)) + int(30.6001 * (month + 1.0)) + (day_decimal - 1_524.5_f64);
     if julian_day > GREGORIAN_REFORM_JD_NO_B {
         let a = int(year / 100.0);
         julian_day + (2.0 - a + int(a / 4.0))
@@ -49,14 +53,20 @@ pub fn julian_day<Tz: TimeZone>(datetime: &SpaDateTime<Tz>) -> f64 {
 
 /// Calendar date corresponding to `julian_day` (UT), projected onto `tz`.
 ///
-/// Returns [`None`] for dates valid in the Julian calendar but not in chrono's
-/// proleptic Gregorian (the canonical example is `-1000-02-29`, Table A4.1).
+/// Returns [`None`] when the date or its rounded time is outside chrono's
+/// representable range, or is valid only in the Julian calendar (for example
+/// `-1000-02-29`, Table A4.1).
 ///
 /// Equations A15 to A23.
 #[must_use]
-#[allow(clippy::many_single_char_names, clippy::cast_possible_truncation)]
+#[expect(
+    clippy::many_single_char_names,
+    clippy::cast_possible_truncation,
+    clippy::as_conversions,
+    reason = "The SPA equations round or truncate floating-point calendar components before validation."
+)]
 pub fn calendar_date_from_julian_day(julian_day: f64, tz: Tz) -> Option<DateTime<Tz>> {
-    let jd_plus_half = julian_day + 0.5;
+    let jd_plus_half = julian_day + 0.5_f64;
     let z = int(jd_plus_half);
     let f = jd_plus_half - z;
 
@@ -64,21 +74,25 @@ pub fn calendar_date_from_julian_day(julian_day: f64, tz: Tz) -> Option<DateTime
         z
     } else {
         let b = int((z - 1_867_216.25) / 36_524.25);
-        z + 1.0 + b - int(b / 4.0)
+        z + 1.0_f64 + b - int(b / 4.0)
     };
 
-    let c = a + 1524.0;
+    let c = a + 1_524.0_f64;
     let d = int((c - 122.1) / 365.25);
     let g = int(365.25 * d);
     let i = int((c - g) / 30.6001);
     let day_decimal = c - g - int(30.6001 * i) + f;
 
     let i_int = i as i32;
-    let month = if i_int < 14 { i_int - 1 } else { i_int - 13 };
-    let year = if month > 2 {
-        d as i32 - 4716
+    let month = if i_int < 14_i32 {
+        i_int.saturating_sub(1)
     } else {
-        d as i32 - 4715
+        i_int.saturating_sub(13)
+    };
+    let year = if month > 2_i32 {
+        (d as i32).saturating_sub(4_716)
+    } else {
+        (d as i32).saturating_sub(4_715)
     };
 
     // Round to whole seconds and add as a `TimeDelta`, so a fraction that
@@ -87,9 +101,11 @@ pub fn calendar_date_from_julian_day(julian_day: f64, tz: Tz) -> Option<DateTime
     let day_fraction = day_decimal - f64::from(day_int);
     let seconds_into_day = (day_fraction * 86_400.0).round() as i64;
 
-    NaiveDate::from_ymd_opt(year, month.cast_unsigned(), day_int.cast_unsigned()).map(|date| {
-        let naive = NaiveDateTime::new(date, NaiveTime::MIN) + TimeDelta::seconds(seconds_into_day);
-        Utc.from_utc_datetime(&naive).with_timezone(&tz)
+    NaiveDate::from_ymd_opt(year, month.cast_unsigned(), day_int.cast_unsigned()).and_then(|date| {
+        // A valid day leaves a fraction smaller than one day, so the duration fits.
+        let naive = NaiveDateTime::new(date, NaiveTime::MIN)
+            .checked_add_signed(TimeDelta::seconds(seconds_into_day))?;
+        Some(Utc.from_utc_datetime(&naive).with_timezone(&tz))
     })
 }
 
@@ -123,6 +139,26 @@ mod tests {
     use super::*;
     use chrono::Offset;
 
+    #[test]
+    fn calendar_date_rejects_unrepresentable_dates_and_rounded_times() {
+        for jd in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::MAX,
+            f64::MIN,
+        ] {
+            assert!(calendar_date_from_julian_day(jd, chrono_tz::UTC).is_none());
+        }
+        let last_instant = SpaDateTime::new(
+            DateTime::<Utc>::MAX_UTC
+                .checked_sub_signed(TimeDelta::milliseconds(250))
+                .unwrap(),
+        );
+        let jd = julian_day(&last_instant);
+        assert!(calendar_date_from_julian_day(jd, chrono_tz::UTC).is_none());
+    }
+
     /// Table A4.1: `(year, month, day, hour, minute, second, expected_jd)`.
     const TABLE_A4_1: [(i32, u32, u32, u32, u32, u32, f64); 15] = [
         (2000, 1, 1, 12, 0, 0, 2_451_545.0),
@@ -147,7 +183,10 @@ mod tests {
     const LOCAL_TIME_CASES: [(i32, u32, u32, u32, u32, u32); 2] =
         [(2026, 3, 15, 23, 41, 0), (2026, 3, 30, 23, 41, 0)];
 
-    #[allow(clippy::many_single_char_names)]
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "Keep the parameter names and grouping used by the SPA equations."
+    )]
     fn build_datetime(tz: Tz, y: i32, m: u32, d: u32, h: u32, min: u32, s: u32) -> DateTime<Tz> {
         tz.with_ymd_and_hms(y, m, d, h, min, s).single().unwrap()
     }
@@ -178,15 +217,13 @@ mod tests {
 
     #[test]
     fn julian_day_is_timezone_invariant() {
-        let local_dts: Vec<DateTime<Tz>> = LOCAL_TIME_CASES
-            .iter()
-            .map(|&(y, m, d, h, min, s)| {
-                build_datetime(chrono_tz::Europe::Madrid, y, m, d, h, min, s)
-            })
-            .collect();
+        let local_dts = LOCAL_TIME_CASES.map(|(y, m, d, h, min, s)| {
+            build_datetime(chrono_tz::Europe::Madrid, y, m, d, h, min, s)
+        });
+        let [before, after] = &local_dts;
         assert_ne!(
-            local_dts[0].offset().fix().local_minus_utc(),
-            local_dts[1].offset().fix().local_minus_utc(),
+            before.offset().fix().local_minus_utc(),
+            after.offset().fix().local_minus_utc(),
         );
         for local in local_dts {
             let utc = local.with_timezone(&chrono_tz::UTC);
@@ -238,10 +275,10 @@ mod tests {
     fn julian_day_includes_dut1_correction() {
         let dt = build_datetime(chrono_tz::UTC, 2003, 10, 17, 19, 30, 30);
         let jd_zero = julian_day(&SpaDateTime::new(dt));
-        for &dut1 in &[-0.5_f64, 0.5] {
+        for &dut1 in &[-0.5_f64, 0.5_f64] {
             let with_dut1 = SpaDateTime::new(dt).try_with_dut1(dut1).unwrap();
             let shift = julian_day(&with_dut1) - jd_zero;
-            assert!((shift - dut1 / 86_400.0).abs() < 1e-9);
+            assert!((shift - dut1 / 86_400.0).abs() < 1e-9_f64);
         }
     }
 
@@ -250,7 +287,7 @@ mod tests {
         let base = build_datetime(chrono_tz::UTC, 2003, 10, 17, 19, 30, 30);
         let with_nanos = base.with_nanosecond(250_000_000).unwrap();
         let shift = julian_day(&SpaDateTime::new(with_nanos)) - julian_day(&SpaDateTime::new(base));
-        assert!((shift - 0.25 / 86_400.0).abs() < 1e-9);
+        assert!((shift - 0.25 / 86_400.0).abs() < 1e-9_f64);
     }
 
     #[test]
@@ -258,7 +295,7 @@ mod tests {
         assert!(julian_century(2_451_545.0).abs() < f64::EPSILON);
         assert!((julian_century(2_451_545.0 + 36_525.0) - 1.0).abs() < f64::EPSILON);
 
-        let jd = 2_452_930.312_847;
+        let jd = 2_452_930.312_847_f64;
         assert!((julian_ephemeris_day(jd, 86_400.0) - jd - 1.0).abs() < f64::EPSILON);
 
         let jde = julian_ephemeris_day(jd, 0.0);

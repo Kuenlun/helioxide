@@ -51,10 +51,9 @@ pub fn fundamental_arguments(jce: f64) -> [f64; 5] {
     X_POLYNOMIALS.map(|[c0, c1, c2, c3]| c3.mul_add(jce, c2).mul_add(jce, c1).mul_add(jce, c0))
 }
 
-#[allow(
+#[expect(
     clippy::unreadable_literal,
-    clippy::approx_constant,
-    clippy::excessive_precision
+    reason = "Preserve the published SPA table coefficients and their printed precision."
 )]
 mod tables {
     use super::NutationTerm;
@@ -144,24 +143,27 @@ mod tests {
     #[test]
     fn delta_psi_matches_table_a5_1() {
         let (delta_psi, _) = nutation_in_longitude_and_obliquity(reference_jce());
-        assert!((delta_psi - -0.003_998_40).abs() < 1e-8);
+        assert!((delta_psi - -0.003_998_40).abs() < 1e-8_f64);
     }
 
     #[test]
     fn delta_epsilon_matches_table_a5_1() {
         let (_, delta_epsilon) = nutation_in_longitude_and_obliquity(reference_jce());
-        assert!((delta_epsilon - 0.001_666_57).abs() < 1e-8);
+        assert!((delta_epsilon - 0.001_666_57).abs() < 1e-8_f64);
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn fundamental_arguments_at_j2000_collapse_to_constant_terms() {
         let [x0, x1, x2, x3, x4] = fundamental_arguments(0.0);
-        assert_eq!(x0, 297.85036);
-        assert_eq!(x1, 357.52772);
-        assert_eq!(x2, 134.96298);
-        assert_eq!(x3, 93.27191);
-        assert_eq!(x4, 125.04452);
+        assert_eq!(x0, 297.850_36_f64);
+        assert_eq!(x1, 357.527_72_f64);
+        assert_eq!(x2, 134.962_98_f64);
+        assert_eq!(x3, 93.271_91_f64);
+        assert_eq!(x4, 125.044_52_f64);
     }
 
     #[test]
@@ -175,21 +177,23 @@ mod tests {
         };
         assert!(
             (x0 - expected([297.85036, 445_267.111_480, -0.001_914_2, 1.0 / 189_474.0])).abs()
-                < 1e-9
+                < 1e-9_f64
         );
         assert!(
             (x1 - expected([357.52772, 35_999.050_340, -0.000_160_3, -1.0 / 300_000.0])).abs()
-                < 1e-9
+                < 1e-9_f64
         );
         assert!(
-            (x2 - expected([134.96298, 477_198.867_398, 0.008_697_2, 1.0 / 56_250.0])).abs() < 1e-9
+            (x2 - expected([134.96298, 477_198.867_398, 0.008_697_2, 1.0 / 56_250.0])).abs()
+                < 1e-9_f64
         );
         assert!(
             (x3 - expected([93.27191, 483_202.017_538, -0.003_682_5, 1.0 / 327_270.0])).abs()
-                < 1e-9
+                < 1e-9_f64
         );
         assert!(
-            (x4 - expected([125.04452, -1_934.136_261, 0.002_070_8, 1.0 / 450_000.0])).abs() < 1e-9
+            (x4 - expected([125.04452, -1_934.136_261, 0.002_070_8, 1.0 / 450_000.0])).abs()
+                < 1e-9_f64
         );
     }
 }

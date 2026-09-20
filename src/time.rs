@@ -10,8 +10,10 @@ use thiserror::Error;
 /// IERS bound on `|DUT1| < 1 s` (leap seconds keep UT1 within this band).
 const DUT1_LIMIT_SECONDS: f64 = 1.0;
 
+/// Invalid UT1 correction for a civil instant.
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum SpaTimeError {
+    /// DUT1 is non-finite or outside the open interval (-1, 1) seconds.
     #[error("DUT1 must lie in the open interval (-1, 1) s, got {0}")]
     Dut1OutOfRange(f64),
 }
@@ -51,11 +53,13 @@ impl<Tz: TimeZone> SpaDateTime<Tz> {
         Ok(self)
     }
 
+    /// Civil instant and its timezone.
     #[must_use]
     pub const fn datetime(&self) -> &DateTime<Tz> {
         &self.datetime
     }
 
+    /// UT1 minus UTC, in seconds.
     #[must_use]
     pub const fn dut1(&self) -> f64 {
         self.dut1
@@ -91,24 +95,33 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn new_defaults_dut1_to_zero() {
-        assert_eq!(SpaDateTime::new(dt()).dut1(), 0.0);
+        assert_eq!(SpaDateTime::new(dt()).dut1(), 0.0_f64);
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn try_with_dut1_accepts_open_unit_interval() {
-        for dut1 in [-0.999, -0.5, 0.0, 0.5, 0.999] {
+        for dut1 in [-0.999_f64, -0.5_f64, 0.0_f64, 0.5_f64, 0.999_f64] {
             let stored = SpaDateTime::new(dt()).try_with_dut1(dut1).unwrap().dut1();
             assert_eq!(stored, dut1);
         }
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn try_with_dut1_rejects_boundary_and_beyond() {
-        for dut1 in [-1.5, -1.0, 1.0, 1.5] {
+        for dut1 in [-1.5_f64, -1.0_f64, 1.0_f64, 1.5_f64] {
             let SpaTimeError::Dut1OutOfRange(reported) =
                 SpaDateTime::new(dt()).try_with_dut1(dut1).unwrap_err();
             assert_eq!(reported, dut1);
@@ -145,12 +158,15 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn with_datetime_preserves_dut1_and_swaps_instant() {
         let original = SpaDateTime::try_new(dt(), 0.25).unwrap();
         let new_instant = Utc.with_ymd_and_hms(2030, 1, 2, 3, 4, 5).unwrap();
         let retargeted = original.with_datetime(new_instant);
-        assert_eq!(retargeted.dut1(), 0.25);
+        assert_eq!(retargeted.dut1(), 0.25_f64);
         assert_eq!(retargeted.datetime(), &new_instant);
     }
 }

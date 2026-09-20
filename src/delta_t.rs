@@ -153,31 +153,27 @@ pub fn delta_t_seconds_for_datetime<Tz: TimeZone>(datetime: &DateTime<Tz>) -> f6
 /// interpolated between adjacent monthly samples of the USNO table. Returns
 /// [`None`] when the date lies outside the published window.
 #[must_use]
-#[allow(
-    clippy::cast_possible_wrap,
-    clippy::cast_sign_loss,
-    reason = "month fits in 1..=12 and the post-check `idx < 0` rules out sign loss"
-)]
 pub fn observed_delta_t_seconds_for_datetime<Tz: TimeZone>(datetime: &DateTime<Tz>) -> Option<f64> {
     let naive = datetime.naive_utc();
     let year = naive.year();
     let month = naive.month();
 
-    let idx = (year - OBSERVED_BASE_YEAR) * 12 + (month as i32 - OBSERVED_BASE_MONTH);
-    if idx < 0 || idx as usize + 1 >= OBSERVED_DELTA_T.len() {
-        return None;
-    }
-    let idx = idx as usize;
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "Chrono years are bounded to about +/-262,000 and months to 1..=12."
+    )]
+    let idx = (i64::from(year) - i64::from(OBSERVED_BASE_YEAR)) * 12_i64
+        + (i64::from(month) - i64::from(OBSERVED_BASE_MONTH));
+    let idx = usize::try_from(idx).ok()?;
+    let [a, b] = OBSERVED_DELTA_T.get(idx..)?.first_chunk::<2>()?;
 
     let seconds_into_day =
         f64::from(naive.nanosecond()).mul_add(1.0e-9, f64::from(naive.num_seconds_from_midnight()));
-    let day_of_month = f64::from(naive.day() - 1);
+    let day_of_month = f64::from(naive.day0());
     let fraction =
         (day_of_month + seconds_into_day / SECONDS_PER_DAY) / f64::from(days_in_month(year, month));
 
-    let a = OBSERVED_DELTA_T[idx];
-    let b = OBSERVED_DELTA_T[idx + 1];
-    Some((b - a).mul_add(fraction, a))
+    Some((b - a).mul_add(fraction, *a))
 }
 
 /// Decimal year `year + day_of_year_fraction`, honouring the Gregorian leap rule.
@@ -201,7 +197,7 @@ pub fn decimal_year<Tz: TimeZone>(datetime: &DateTime<Tz>) -> f64 {
 /// Morrison-Stephenson 2004: `ΔT = -20 + 32·((y - 1820)/100)²` (seconds).
 #[inline]
 fn long_term_parabola(decimal_year: f64) -> f64 {
-    let u = (decimal_year - 1820.0) / 100.0;
+    let u = (decimal_year - 1_820.0_f64) / 100.0_f64;
     32.0_f64.mul_add(u * u, -20.0)
 }
 
@@ -226,14 +222,13 @@ const fn is_gregorian_leap_year(year: i32) -> bool {
     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
-const DAYS_PER_MONTH: [u32; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-
 #[inline]
 const fn days_in_month(year: i32, month: u32) -> u32 {
-    if month == 2 && is_gregorian_leap_year(year) {
-        29
-    } else {
-        DAYS_PER_MONTH[(month - 1) as usize]
+    match month {
+        2 if is_gregorian_leap_year(year) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
     }
 }
 
@@ -442,50 +437,50 @@ mod tests {
     fn every_segment_collapses_to_constant_at_substitution_zero() {
         for (year, expected) in SEGMENT_CONSTANT_ANCHORS {
             let value = approximate_delta_t_seconds(year);
-            assert!((value - expected).abs() < 1e-3, "y={year}: got {value}");
+            assert!((value - expected).abs() < 1e-3_f64, "y={year}: got {value}");
         }
     }
 
     #[test]
     fn short_range_quadratic_matches_hand_computed_values() {
         // 62.92 + 0.32217·t + 0.005589·t² with t = y - 2000.
-        assert!((approximate_delta_t_seconds(2_020.0) - 71.599_0).abs() < 1e-4);
-        assert!((approximate_delta_t_seconds(2_026.0) - 75.074_584).abs() < 1e-4);
-        assert!((approximate_delta_t_seconds(2_050.0) - 93.001_0).abs() < 1e-3);
+        assert!((approximate_delta_t_seconds(2_020.0) - 71.599_0).abs() < 1e-4_f64);
+        assert!((approximate_delta_t_seconds(2_026.0) - 75.074_584).abs() < 1e-4_f64);
+        assert!((approximate_delta_t_seconds(2_050.0) - 93.001_0).abs() < 1e-3_f64);
     }
 
     #[test]
     fn internal_boundaries_are_continuous_within_two_seconds() {
-        let epsilon = 1.0e-6;
+        let epsilon = 1.0e-6_f64;
         for boundary in INTERNAL_BOUNDARY_YEARS {
             let below = approximate_delta_t_seconds(boundary - epsilon);
             let above = approximate_delta_t_seconds(boundary + epsilon);
-            assert!((above - below).abs() < 2.0, "jump at y={boundary}");
+            assert!((above - below).abs() < 2.0_f64, "jump at y={boundary}");
         }
     }
 
     #[test]
     fn long_term_parabola_branch_matches_morrison_stephenson() {
         // -20 + 32·((2500 - 1820)/100)² = 1459.68.
-        assert!((approximate_delta_t_seconds(2_500.0) - 1_459.68).abs() < 1e-9);
+        assert!((approximate_delta_t_seconds(2_500.0) - 1_459.68).abs() < 1e-9_f64);
         // Mirror: -20 + 32·((-1500 - 1820)/100)² = 35251.68.
-        assert!((approximate_delta_t_seconds(-1_500.0) - 35_251.68).abs() < 1e-9);
+        assert!((approximate_delta_t_seconds(-1_500.0) - 35_251.68).abs() < 1e-9_f64);
     }
 
     #[test]
     fn transition_segment_blends_parabola_and_linear_correction() {
-        assert!((approximate_delta_t_seconds(2_150.0) - 328.48).abs() < 1e-9);
-        assert!((approximate_delta_t_seconds(2_100.0) - 202.74).abs() < 1e-9);
+        assert!((approximate_delta_t_seconds(2_150.0) - 328.48).abs() < 1e-9_f64);
+        assert!((approximate_delta_t_seconds(2_100.0) - 202.74).abs() < 1e-9_f64);
 
         let just_after_handoff = approximate_delta_t_seconds(2_050.000_001);
         let parabola_at_handoff =
             0.5628_f64.mul_add(-100.0, 32.0_f64.mul_add(2.30_f64.powi(2), -20.0));
-        assert!((just_after_handoff - parabola_at_handoff).abs() < 1e-3);
+        assert!((just_after_handoff - parabola_at_handoff).abs() < 1e-3_f64);
     }
 
     #[test]
     fn decimal_year_anchors_january_first_to_year_dot_zero() {
-        for year in [1_900, 1_999, 2_000, 2_024, 2_026] {
+        for year in [1_900_i32, 1_999_i32, 2_000_i32, 2_024_i32, 2_026_i32] {
             let dt = Utc.with_ymd_and_hms(year, 1, 1, 0, 0, 0).unwrap();
             assert!((decimal_year(&dt) - f64::from(year)).abs() < f64::EPSILON);
         }
@@ -493,10 +488,10 @@ mod tests {
 
     #[test]
     fn decimal_year_recognises_leap_days() {
-        for year in [2_000, 2_024] {
+        for year in [2_000_i32, 2_024_i32] {
             let dt = Utc.with_ymd_and_hms(year, 2, 29, 0, 0, 0).unwrap();
-            let expected = f64::from(year) + 59.0 / 366.0;
-            assert!((decimal_year(&dt) - expected).abs() < 1e-9);
+            let expected = f64::from(year) + 59.0_f64 / 366.0_f64;
+            assert!((decimal_year(&dt) - expected).abs() < 1e-9_f64);
         }
     }
 
@@ -504,9 +499,9 @@ mod tests {
     fn decimal_year_last_moment_of_leap_year_stays_inside() {
         let dt = Utc.with_ymd_and_hms(2_024, 12, 31, 23, 59, 59).unwrap();
         let computed = decimal_year(&dt);
-        let expected = 2_024.0_f64 + (365.0 + 86_399.0 / 86_400.0) / 366.0;
-        assert!((computed - expected).abs() < 1e-12);
-        assert!(computed < 2_025.0);
+        let expected = 2_024.0_f64 + (365.0_f64 + 86_399.0_f64 / 86_400.0_f64) / 366.0_f64;
+        assert!((computed - expected).abs() < 1e-12_f64);
+        assert!(computed < 2_025.0_f64);
     }
 
     #[test]
@@ -514,7 +509,7 @@ mod tests {
         let base = Utc.with_ymd_and_hms(2_026, 5, 16, 12, 0, 0).unwrap();
         let with_nanos = base.with_nanosecond(500_000_000).unwrap();
         let delta = decimal_year(&with_nanos) - decimal_year(&base);
-        assert!((delta - 0.5 / 86_400.0 / 365.0).abs() < 1e-12);
+        assert!((delta - 0.5 / 86_400.0 / 365.0).abs() < 1e-12_f64);
     }
 
     #[test]
@@ -530,7 +525,10 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn for_datetime_is_pure_composition() {
         let dt = Utc.with_ymd_and_hms(2_026, 5, 16, 12, 0, 0).unwrap();
         assert_eq!(
@@ -544,7 +542,7 @@ mod tests {
         // 2020-01-01 00:00 UTC → first cell of the 2020 row.
         let dt = Utc.with_ymd_and_hms(2_020, 1, 1, 0, 0, 0).unwrap();
         let v = observed_delta_t_seconds_for_datetime(&dt).unwrap();
-        assert!((v - 69.3612).abs() < 1e-12);
+        assert!((v - 69.3612).abs() < 1e-12_f64);
     }
 
     #[test]
@@ -553,7 +551,7 @@ mod tests {
         let dt = Utc.with_ymd_and_hms(2_021, 4, 16, 0, 0, 0).unwrap();
         let expected = f64::midpoint(69.3582, 69.3673);
         let v = observed_delta_t_seconds_for_datetime(&dt).unwrap();
-        assert!((v - expected).abs() < 1e-9);
+        assert!((v - expected).abs() < 1e-9_f64);
     }
 
     #[test]
@@ -562,7 +560,7 @@ mod tests {
         let dt = Utc.with_ymd_and_hms(2_020, 2, 15, 12, 0, 0).unwrap();
         let expected = f64::midpoint(69.3752, 69.3890);
         let v = observed_delta_t_seconds_for_datetime(&dt).unwrap();
-        assert!((v - expected).abs() < 1e-9);
+        assert!((v - expected).abs() < 1e-9_f64);
     }
 
     #[test]
@@ -585,13 +583,13 @@ mod tests {
 
     #[test]
     fn observed_lookup_is_timezone_invariant() {
-        let madrid = chrono_tz::Tz::Europe__Madrid
+        let madrid = Tz::Europe__Madrid
             .with_ymd_and_hms(2_024, 7, 1, 2, 0, 0)
             .unwrap();
         let utc = madrid.with_timezone(&Utc);
         let m = observed_delta_t_seconds_for_datetime(&madrid).unwrap();
         let u = observed_delta_t_seconds_for_datetime(&utc).unwrap();
-        assert!((m - u).abs() < 1e-12);
+        assert!((m - u).abs() < 1e-12_f64);
     }
 
     #[test]
@@ -601,8 +599,8 @@ mod tests {
         // so the gap is large enough to verify the lookup is wired in.
         let dt = Utc.with_ymd_and_hms(2_024, 7, 1, 0, 0, 0).unwrap();
         let observed = delta_t_seconds_for_datetime(&dt);
-        assert!((observed - 69.1879).abs() < 1e-12);
-        assert!((observed - approximate_delta_t_seconds_for_datetime(&dt)).abs() > 0.5);
+        assert!((observed - 69.1879).abs() < 1e-12_f64);
+        assert!((observed - approximate_delta_t_seconds_for_datetime(&dt)).abs() > 0.5_f64);
     }
 
     #[test]
@@ -610,7 +608,10 @@ mod tests {
         let pre = Utc.with_ymd_and_hms(1_900, 6, 1, 0, 0, 0).unwrap();
         let post = Utc.with_ymd_and_hms(2_030, 1, 1, 0, 0, 0).unwrap();
         for dt in [pre, post] {
-            #[allow(clippy::float_cmp)]
+            #[expect(
+                clippy::float_cmp,
+                reason = "These cases require exact preservation of stored values or exact boundary results."
+            )]
             {
                 assert_eq!(
                     delta_t_seconds_for_datetime(&dt),
@@ -635,8 +636,8 @@ mod tests {
     fn observed_table_is_well_formed() {
         // 1973-02 .. 2026-04 inclusive = 11 + 52*12 + 4 = 639 monthly entries.
         assert_eq!(OBSERVED_DELTA_T.len(), 639);
-        assert_eq!(OBSERVED_BASE_YEAR, 1_973);
-        assert_eq!(OBSERVED_BASE_MONTH, 2);
+        assert_eq!(OBSERVED_BASE_YEAR, 1_973_i32);
+        assert_eq!(OBSERVED_BASE_MONTH, 2_i32);
     }
 
     #[test]

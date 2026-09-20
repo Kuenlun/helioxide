@@ -31,39 +31,58 @@ mod tests {
     fn geocentric_longitude_matches_table_a5_1() {
         let l = earth_heliocentric_longitude(reference_jme());
         let theta = geocentric_longitude(l);
-        assert!((theta - 204.018_261_691_7).abs() < 1e-6);
+        assert!((theta - 204.018_261_691_7).abs() < 1e-6_f64);
     }
 
     #[test]
     fn geocentric_latitude_matches_table_a5_1() {
         let b = earth_heliocentric_latitude(reference_jme());
         let beta = geocentric_latitude(b);
-        assert!((beta - 0.000_101_121_9).abs() < 1e-9);
-        assert!(beta > 0.0);
+        assert!((beta - 0.000_101_121_9).abs() < 1e-9_f64);
+        assert!(beta > 0.0_f64);
     }
 
     #[test]
     fn geocentric_longitude_wraps_into_zero_360() {
-        for &l in &[0.0_f64, 90.0, 179.999, 180.0, 181.0, 359.999, -45.0, 720.5] {
+        for &l in &[
+            0.0_f64,
+            90.0_f64,
+            179.999_f64,
+            180.0_f64,
+            181.0_f64,
+            359.999_f64,
+            -45.0_f64,
+            720.5_f64,
+        ] {
             let theta = geocentric_longitude(l);
-            assert!((0.0..360.0).contains(&theta));
+            assert!((0.0_f64..360.0_f64).contains(&theta));
         }
     }
 
     #[test]
     fn geocentric_longitude_offsets_input_by_180_modulo_360() {
-        for &l in &[0.0_f64, 30.0, 179.999, 180.0, 200.0, 350.0] {
+        for &l in &[
+            0.0_f64,
+            30.0_f64,
+            179.999_f64,
+            180.0_f64,
+            200.0_f64,
+            350.0_f64,
+        ] {
             let theta = geocentric_longitude(l);
             let residue = (theta - l - 180.0).rem_euclid(360.0);
             let distance_to_zero = residue.min(360.0 - residue);
-            assert!(distance_to_zero < 1e-12);
+            assert!(distance_to_zero < 1e-12_f64);
         }
     }
 
     #[test]
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "These cases require exact preservation of stored values or exact boundary results."
+    )]
     fn geocentric_latitude_negates_input() {
-        for &b in &[-1.0_f64, -1e-6, -0.0, 0.0, 1e-6, 1.0] {
+        for &b in &[-1.0_f64, -1e-6_f64, -0.0_f64, 0.0_f64, 1e-6_f64, 1.0_f64] {
             assert_eq!(geocentric_latitude(b), -b);
         }
     }

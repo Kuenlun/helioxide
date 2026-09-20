@@ -31,7 +31,7 @@ high-precision solar calculations, faithful to Reda & Andreas,
   events back in the same timezone, handling DST gaps and overlaps.
 - **Valid by construction** — [`Observer`], [`Surface`] and [`SpaDateTime`]
   validate their domains at the boundary, so the numeric pipeline itself is
-  infallible. `#![forbid(unsafe_code)]`, no panics, 100% branch coverage.
+  infallible. Unsafe code is denied in `Cargo.toml`, with 100% branch coverage.
 
 [`SolarPosition`]: https://docs.rs/helioxide/latest/helioxide/spa/struct.SolarPosition.html
 [`SolarPosition::compute`]: https://docs.rs/helioxide/latest/helioxide/spa/struct.SolarPosition.html#method.compute
@@ -76,6 +76,15 @@ Each pipeline stage (heliocentric, geocentric, nutation, parallax, …) also
 lives in its own module as a documented free function keyed to the paper's
 equation numbers, so partial computations and cross-checks against the
 report are straightforward.
+
+## Development
+
+Install the same Lockpick revision used by CI, then run the quality checks:
+
+```sh
+cargo install --git https://github.com/Kuenlun/lockpick --rev d611414b8676d5bf2b3b97ee4484a082b8749634 --locked lockpick
+lockpick
+```
 
 ## License
 

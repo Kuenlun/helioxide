@@ -132,7 +132,7 @@ mod tests {
             REFERENCE_LATITUDE_DEGREES,
             REFERENCE_ELEVATION_METRES,
         );
-        assert!((coords.right_ascension - 202.227_04).abs() < 1e-4);
+        assert!((coords.right_ascension - 202.227_04).abs() < 1e-4_f64);
     }
 
     #[test]
@@ -146,36 +146,36 @@ mod tests {
             REFERENCE_LATITUDE_DEGREES,
             REFERENCE_ELEVATION_METRES,
         );
-        assert!((coords.declination - -9.316_179).abs() < 1e-4);
+        assert!((coords.declination - -9.316_179).abs() < 1e-4_f64);
     }
 
     #[test]
     fn equatorial_horizontal_parallax_at_unit_distance() {
         let xi = equatorial_horizontal_parallax(1.0);
-        let expected = SOLAR_HORIZONTAL_PARALLAX_AT_UNIT_DISTANCE_ARCSECONDS / 3600.0;
+        let expected = SOLAR_HORIZONTAL_PARALLAX_AT_UNIT_DISTANCE_ARCSECONDS / 3_600.0_f64;
         assert!((xi - expected).abs() < f64::EPSILON);
     }
 
     #[test]
     fn equatorial_horizontal_parallax_inverse_in_r() {
         let xi_unit = equatorial_horizontal_parallax(1.0);
-        for &r in &[0.5_f64, 0.95, 1.05, 2.0, 10.0] {
+        for &r in &[0.5_f64, 0.95_f64, 1.05_f64, 2.0_f64, 10.0_f64] {
             let xi = equatorial_horizontal_parallax(r);
-            assert!(xi.mul_add(r, -xi_unit).abs() < 1e-15);
+            assert!(xi.mul_add(r, -xi_unit).abs() < 1e-15_f64);
         }
     }
 
     #[test]
     fn corrections_vanish_at_zero_parallax() {
         for &(alpha, delta, h, phi, elevation) in &[
-            (10.0_f64, -30.0, 0.0, 0.0, 0.0),
-            (200.0, 5.5, 90.0, 39.742_476, 1830.14),
-            (350.0, -85.0, -45.0, -60.0, 5_000.0),
+            (10.0_f64, -30.0_f64, 0.0_f64, 0.0_f64, 0.0_f64),
+            (200.0_f64, 5.5_f64, 90.0_f64, 39.742_476_f64, 1_830.14_f64),
+            (350.0_f64, -85.0_f64, -45.0_f64, -60.0_f64, 5_000.0_f64),
         ] {
             let coords = topocentric_equatorial_coordinates(alpha, delta, h, 0.0, phi, elevation);
-            assert!(coords.parallax_in_right_ascension.abs() < 1e-15);
-            assert!((coords.right_ascension - alpha).abs() < 1e-13);
-            assert!((coords.declination - delta).abs() < 1e-13);
+            assert!(coords.parallax_in_right_ascension.abs() < 1e-15_f64);
+            assert!((coords.right_ascension - alpha).abs() < 1e-13_f64);
+            assert!((coords.declination - delta).abs() < 1e-13_f64);
         }
     }
 
@@ -183,13 +183,13 @@ mod tests {
     fn parallax_in_right_ascension_vanishes_at_meridian_transit() {
         let xi = equatorial_horizontal_parallax(1.0);
         for &(delta, phi, elevation) in &[
-            (0.0_f64, 0.0, 0.0),
-            (-9.314_34, 39.742_476, 1830.14),
-            (45.0, -45.0, 0.0),
-            (-89.0, 89.0, 5_000.0),
+            (0.0_f64, 0.0_f64, 0.0_f64),
+            (-9.314_34_f64, 39.742_476_f64, 1_830.14_f64),
+            (45.0_f64, -45.0_f64, 0.0_f64),
+            (-89.0_f64, 89.0_f64, 5_000.0_f64),
         ] {
             let c = topocentric_equatorial_coordinates(123.456, delta, 0.0, xi, phi, elevation);
-            assert!(c.parallax_in_right_ascension.abs() < 1e-15);
+            assert!(c.parallax_in_right_ascension.abs() < 1e-15_f64);
         }
     }
 
@@ -197,15 +197,15 @@ mod tests {
     fn parallax_in_right_ascension_is_odd_in_h() {
         let xi = equatorial_horizontal_parallax(0.996_542_297_4);
         for &(delta, h, phi, elevation) in &[
-            (0.0_f64, 30.0, 0.0, 0.0),
-            (-9.314_34, 11.105_900, 39.742_476, 1830.14),
-            (45.0, 60.0, -45.0, 500.0),
-            (-30.0, 89.999, 60.0, 1_500.0),
+            (0.0_f64, 30.0_f64, 0.0_f64, 0.0_f64),
+            (-9.314_34_f64, 11.105_900_f64, 39.742_476_f64, 1_830.14_f64),
+            (45.0_f64, 60.0_f64, -45.0_f64, 500.0_f64),
+            (-30.0_f64, 89.999_f64, 60.0_f64, 1_500.0_f64),
         ] {
             let plus = topocentric_equatorial_coordinates(100.0, delta, h, xi, phi, elevation);
             let minus = topocentric_equatorial_coordinates(100.0, delta, -h, xi, phi, elevation);
             let sum = plus.parallax_in_right_ascension + minus.parallax_in_right_ascension;
-            assert!(sum.abs() < 1e-13);
+            assert!(sum.abs() < 1e-13_f64);
         }
     }
 
@@ -214,7 +214,7 @@ mod tests {
         let xi = equatorial_horizontal_parallax(1.0);
         let baseline =
             topocentric_equatorial_coordinates(100.0, 10.0, 30.0, xi, 39.742_476, 1830.14);
-        for &kappa in &[-30.0_f64, -1e-3, 1e-6, 0.5, 50.0] {
+        for &kappa in &[-30.0_f64, -1e-3_f64, 1e-6_f64, 0.5_f64, 50.0_f64] {
             let shifted = topocentric_equatorial_coordinates(
                 100.0 + kappa,
                 10.0,
@@ -223,12 +223,12 @@ mod tests {
                 39.742_476,
                 1830.14,
             );
-            assert!((shifted.right_ascension - baseline.right_ascension - kappa).abs() < 1e-13);
+            assert!((shifted.right_ascension - baseline.right_ascension - kappa).abs() < 1e-13_f64);
             assert!(
                 (shifted.parallax_in_right_ascension - baseline.parallax_in_right_ascension).abs()
-                    < 1e-15,
+                    < 1e-15_f64,
             );
-            assert!((shifted.declination - baseline.declination).abs() < 1e-15);
+            assert!((shifted.declination - baseline.declination).abs() < 1e-15_f64);
         }
     }
 
@@ -246,6 +246,6 @@ mod tests {
         );
         let ratio =
             one_radius_up.parallax_in_right_ascension / sea_level.parallax_in_right_ascension;
-        assert!((ratio - 2.0).abs() < 1e-7);
+        assert!((ratio - 2.0).abs() < 1e-7_f64);
     }
 }
