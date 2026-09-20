@@ -13,6 +13,9 @@ categories = ["science", "mathematics"]
 [package.metadata.lockpick]
 license-header = ".github/license_header.rs"
 
+[package.metadata.lockpick.coverage]
+branches = 100
+
 [dependencies]
 chrono = "0.4"
 chrono-tz = "0.10"
