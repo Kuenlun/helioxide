@@ -4,15 +4,17 @@
 
 //! `ΔT = TT − UT1` (seconds), observed values with polynomial fallback.
 //!
-//! [`delta_t_seconds_for_datetime`] returns the published USNO monthly value
-//! (linearly interpolated between the first of each month) when the date lies
-//! inside the observed window, and otherwise falls back to the piecewise
+//! [`delta_t_seconds_for_datetime`] interpolates monthly samples and a recent
+//! daily continuation, derived from observed USNO Earth orientation data.
+//! Outside the observed window it falls back to the piecewise
 //! polynomials of Espenak and Meeus from the *Five Millennium Canon of Solar
 //! Eclipses: -1999 to +3000* (NASA/TP-2006-214141), with the long-term
 //! parabola of Morrison and Stephenson (2004) outside the fitted window.
 //!
 //! References:
 //! - <https://maia.usno.navy.mil/ser7/deltat.data>
+//! - <https://maia.usno.navy.mil/ser7/finals2000A.all>
+//! - <https://maia.usno.navy.mil/information/eo-values>
 //! - <https://eclipse.gsfc.nasa.gov/SEcat5/deltatpoly.html>
 
 use chrono::{DateTime, Datelike, TimeZone, Timelike};
@@ -140,8 +142,8 @@ pub fn approximate_delta_t_seconds_for_datetime<Tz: TimeZone>(datetime: &DateTim
 
 /// Best available `ΔT` (seconds) for the UTC instant of `datetime`.
 ///
-/// Returns the observed USNO value (linearly interpolated between monthly
-/// samples) when inside the published window, otherwise the polynomial
+/// Returns the observed value, interpolated between monthly or recent daily
+/// samples, when inside the published window, otherwise the polynomial
 /// approximation.
 #[must_use]
 pub fn delta_t_seconds_for_datetime<Tz: TimeZone>(datetime: &DateTime<Tz>) -> f64 {
@@ -149,9 +151,10 @@ pub fn delta_t_seconds_for_datetime<Tz: TimeZone>(datetime: &DateTime<Tz>) -> f6
         .unwrap_or_else(|| approximate_delta_t_seconds_for_datetime(datetime))
 }
 
-/// Observed `ΔT` (seconds) at the UTC instant of `datetime`, linearly
-/// interpolated between adjacent monthly samples of the USNO table. Returns
-/// [`None`] when the date lies outside the published window.
+/// Observed `ΔT` (seconds) at the UTC instant of `datetime`.
+///
+/// Interpolates monthly samples, then daily observations in the final month.
+/// Returns [`None`] outside the observed window, without using predictions.
 #[must_use]
 pub fn observed_delta_t_seconds_for_datetime<Tz: TimeZone>(datetime: &DateTime<Tz>) -> Option<f64> {
     let naive = datetime.naive_utc();
@@ -165,13 +168,26 @@ pub fn observed_delta_t_seconds_for_datetime<Tz: TimeZone>(datetime: &DateTime<T
     let idx = (i64::from(year) - i64::from(OBSERVED_BASE_YEAR)) * 12_i64
         + (i64::from(month) - i64::from(OBSERVED_BASE_MONTH));
     let idx = usize::try_from(idx).ok()?;
-    let (a, remaining) = OBSERVED_DELTA_T.get(idx..)?.split_first()?;
+    let monthly_samples = OBSERVED_DELTA_T.get(idx..)?;
 
     let seconds_into_day =
         f64::from(naive.nanosecond()).mul_add(1.0e-9, f64::from(naive.num_seconds_from_midnight()));
     let day_of_month = f64::from(naive.day0());
-    let fraction =
-        (day_of_month + seconds_into_day / SECONDS_PER_DAY) / f64::from(days_in_month(year, month));
+    let day_fraction = seconds_into_day / SECONDS_PER_DAY;
+    let (samples, fraction) = if monthly_samples.len() == 1 {
+        #[expect(
+            clippy::as_conversions,
+            reason = "Chrono day0 is in 0..=30 and fits every supported usize."
+        )]
+        let day_index = naive.day0() as usize;
+        (FINAL_MONTH_DAILY_DELTA_T.get(day_index..)?, day_fraction)
+    } else {
+        (
+            monthly_samples,
+            (day_of_month + day_fraction) / f64::from(days_in_month(year, month)),
+        )
+    };
+    let (a, remaining) = samples.split_first()?;
 
     if fraction == 0.0_f64 {
         return Some(*a);
@@ -242,8 +258,12 @@ const OBSERVED_BASE_MONTH: i32 = 2;
 
 /// Observed monthly `ΔT` values (seconds), one entry per month starting at
 /// (`OBSERVED_BASE_YEAR`, `OBSERVED_BASE_MONTH`), each sampled at 00:00 UTC on
-/// the first of the month. Snapshot of <https://maia.usno.navy.mil/ser7/deltat.data>
-/// covering Feb 1973 through Apr 2026.
+/// the first of the month. Feb 1973 through Apr 2026 come from
+/// <https://maia.usno.navy.mil/ser7/deltat.data>. May through Sep 2026 use
+/// <https://maia.usno.navy.mil/ser7/finals2000A.all>, retrieved 2026-09-20:
+/// May-Aug use final Bulletin B UT1-UTC, Sep uses the observed Bulletin A
+/// value (flag I, not prediction P). Convert with ΔT = 32.184 + 37 - (UT1-UTC).
+/// The 37-second TAI-UTC offset applies since 2017-01-01.
 #[rustfmt::skip]
 const OBSERVED_DELTA_T: &[f64] = &[
     // 1973
@@ -407,6 +427,30 @@ const OBSERVED_DELTA_T: &[f64] = &[
     69.0909, 69.1042,
     // 2026
     69.1099, 69.1133, 69.1168, 69.1330,
+    69.151_074_4, 69.166_230_4, 69.169_508_4, 69.171_291_9, 69.181_582_7,
+];
+
+/// Daily continuation of the last month in `OBSERVED_DELTA_T`, starting on
+/// its first day. Observed (I) Bulletin A UT1-UTC from finals2000A.all,
+/// 2026-09-01 through 2026-09-17, using the same TT-UTC conversion above.
+const FINAL_MONTH_DAILY_DELTA_T: &[f64] = &[
+    69.181_582_7,
+    69.182_277_5,
+    69.182_783_4,
+    69.183_054_2,
+    69.183_078_8,
+    69.183_114_6,
+    69.183_312_2,
+    69.183_786_2,
+    69.184_506_8,
+    69.185_521_8,
+    69.186_665_4,
+    69.187_860_2,
+    69.189_057_4,
+    69.190_176_9,
+    69.191_123_6,
+    69.191_884_4,
+    69.192_633_7,
 ];
 
 #[cfg(test)]
@@ -577,13 +621,14 @@ mod tests {
 
     #[test]
     fn observed_lookup_includes_the_last_sample_but_not_later_instants() {
-        let last = Utc.with_ymd_and_hms(2_026, 4, 1, 0, 0, 0).unwrap();
+        let last = Utc.with_ymd_and_hms(2_026, 9, 17, 0, 0, 0).unwrap();
         assert!(
-            (observed_delta_t_seconds_for_datetime(&last).unwrap() - 69.1330).abs() < f64::EPSILON
+            (observed_delta_t_seconds_for_datetime(&last).unwrap() - 69.192_633_7).abs()
+                < f64::EPSILON
         );
         let after = last + chrono::TimeDelta::nanoseconds(1);
         assert!(observed_delta_t_seconds_for_datetime(&after).is_none());
-        let next_month = Utc.with_ymd_and_hms(2_026, 5, 1, 0, 0, 0).unwrap();
+        let next_month = Utc.with_ymd_and_hms(2_026, 10, 1, 0, 0, 0).unwrap();
         assert!(observed_delta_t_seconds_for_datetime(&next_month).is_none());
         let much_later = Utc.with_ymd_and_hms(2_030, 1, 1, 0, 0, 0).unwrap();
         assert!(observed_delta_t_seconds_for_datetime(&much_later).is_none());
@@ -642,8 +687,8 @@ mod tests {
 
     #[test]
     fn observed_table_is_well_formed() {
-        // 1973-02 .. 2026-04 inclusive = 11 + 52*12 + 4 = 639 monthly entries.
-        assert_eq!(OBSERVED_DELTA_T.len(), 639);
+        // 1973-02 through 2026-09, inclusive.
+        assert_eq!(OBSERVED_DELTA_T.len(), 644);
         assert_eq!(OBSERVED_BASE_YEAR, 1_973_i32);
         assert_eq!(OBSERVED_BASE_MONTH, 2_i32);
     }
@@ -659,7 +704,7 @@ mod tests {
     }
 
     #[test]
-    fn automatic_position_uses_the_final_observation() {
+    fn automatic_position_uses_the_observation_at_a_sample() {
         use crate::{Observer, SolarPosition, SpaDateTime};
 
         let date = SpaDateTime::new(Utc.with_ymd_and_hms(2026, 4, 1, 0, 0, 0).unwrap());
@@ -670,6 +715,73 @@ mod tests {
         assert_eq!(
             position,
             SolarPosition::compute_with_delta_t(&date, 69.1330, observer).unwrap()
+        );
+    }
+
+    #[test]
+    fn recent_monthly_samples_match_observed_earth_rotation() {
+        for (month, ut1_minus_utc) in [
+            (5, 0.032_925_6_f64),
+            (6, 0.017_769_6_f64),
+            (7, 0.014_491_6_f64),
+            (8, 0.012_708_1_f64),
+            (9, 0.002_417_3_f64),
+        ] {
+            let date = Utc.with_ymd_and_hms(2026, month, 1, 0, 0, 0).unwrap();
+            let expected = 69.184_f64 - ut1_minus_utc;
+            assert!(
+                (observed_delta_t_seconds_for_datetime(&date).unwrap() - expected).abs()
+                    < 1e-12_f64
+            );
+            assert!((delta_t_seconds_for_datetime(&date) - expected).abs() < 1e-12_f64);
+        }
+    }
+
+    #[test]
+    fn recent_automatic_positions_match_explicit_reference_results() {
+        use crate::{Observer, SolarPosition, SpaDateTime};
+
+        let observer = Observer::try_new(39.742_476, -105.1786, 1830.14, 820.0, 11.0).unwrap();
+        for (month, zenith, azimuth) in [
+            (5, 69.409_962_389_707_97_f64, 272.754_034_601_461_1_f64),
+            (6, 65.158_444_789_413_86_f64, 278.794_722_916_556_9_f64),
+            (7, 63.393_776_833_589_92_f64, 278.913_912_872_185_8_f64),
+            (8, 65.816_436_608_155_21_f64, 273.956_411_694_108_06_f64),
+            (9, 72.948_140_058_926_19_f64, 266.736_587_914_601_7_f64),
+        ] {
+            let date = SpaDateTime::new(Utc.with_ymd_and_hms(2026, month, 1, 0, 0, 0).unwrap());
+            let position = SolarPosition::compute(&date, observer).unwrap();
+            assert!((position.topocentric_zenith - zenith).abs() < 1e-7_f64);
+            assert!((position.topocentric_azimuth - azimuth).abs() < 1e-7_f64);
+        }
+    }
+
+    #[test]
+    fn daily_continuation_preserves_the_month_boundary_and_interpolates_observations() {
+        let first = Utc.with_ymd_and_hms(2026, 9, 1, 0, 0, 0).unwrap();
+        let just_before = first - chrono::TimeDelta::nanoseconds(1);
+        let midnight = observed_delta_t_seconds_for_datetime(&first).unwrap();
+        assert!(
+            (observed_delta_t_seconds_for_datetime(&just_before).unwrap() - midnight).abs()
+                < 1e-12_f64
+        );
+        let midday = first + chrono::TimeDelta::hours(12);
+        let expected = f64::midpoint(69.181_582_7, 69.182_277_5);
+        assert!(
+            (observed_delta_t_seconds_for_datetime(&midday).unwrap() - expected).abs() < 1e-12_f64
+        );
+        let after_observations = Utc.with_ymd_and_hms(2026, 9, 18, 0, 0, 0).unwrap();
+        assert!(observed_delta_t_seconds_for_datetime(&after_observations).is_none());
+        assert!(
+            observed_delta_t_seconds_for_datetime(
+                &(after_observations + chrono::TimeDelta::days(1))
+            )
+            .is_none()
+        );
+        assert_eq!(FINAL_MONTH_DAILY_DELTA_T.len(), 17);
+        assert!(
+            (FINAL_MONTH_DAILY_DELTA_T.first().unwrap() - OBSERVED_DELTA_T.last().unwrap()).abs()
+                < f64::EPSILON
         );
     }
 }

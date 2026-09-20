@@ -23,7 +23,7 @@ high-precision solar calculations, faithful to Reda & Andreas,
   of Tables A4.2 and A4.3 is transcribed digit-for-digit, and the test suite
   pins the appendix A.5 worked example and the Table A4.1 Julian-day cases.
 - **Automatic ΔT** — [`SolarPosition::compute`] and [`SolarDay::compute`]
-  resolve `ΔT = TT − UT1` from the embedded USNO observed monthly table
+  resolve `ΔT = TT − UT1` from embedded monthly and recent daily observations
   (linearly interpolated) and fall back to the Espenak–Meeus polynomials
   outside the observed window; `compute_with_delta_t` pins an explicit value.
 - **Timezone-aware civil days** — inputs are `chrono` datetimes in any
