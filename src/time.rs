@@ -27,6 +27,9 @@ pub enum SpaTimeError {
     /// UTC year lies outside the SPA model's supported interval.
     #[error("UTC year {0} must lie in [-2000, 6000]")]
     YearOutOfRange(i32),
+    /// Calendar label belongs to the skipped Gregorian reform dates.
+    #[error("dates 1582-10-05 through 1582-10-14 do not exist in the SPA mixed calendar")]
+    GregorianReformGap,
     /// Delta T is non-finite or exceeds one day in magnitude.
     #[error("delta T {0} s must be finite and lie in [-86400, 86400]")]
     DeltaTOutOfRange(f64),
@@ -42,6 +45,9 @@ pub(crate) fn validate_spa_time<Tz: TimeZone>(
     let year = datetime.datetime().naive_utc().year();
     if !(MIN_SPA_YEAR..=MAX_SPA_YEAR).contains(&year) {
         return Err(SpaTimeError::YearOutOfRange(year));
+    }
+    if crate::julian::is_gregorian_reform_gap(datetime.datetime().naive_utc().date()) {
+        return Err(SpaTimeError::GregorianReformGap);
     }
     if !(-MAX_ABS_DELTA_T_SECONDS..=MAX_ABS_DELTA_T_SECONDS).contains(&delta_t) {
         return Err(SpaTimeError::DeltaTOutOfRange(delta_t));
