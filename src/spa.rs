@@ -339,7 +339,7 @@ pub struct SolarPosition {
 
     /// Astronomical azimuth in degrees westward from south, in [0, 360).
     pub astronomers_azimuth: f64,
-    /// Astronomical azimuth in degrees westward from south, in [-180, 180).
+    /// Astronomical azimuth in degrees westward from south, in (-180, 180].
     pub astronomers_azimuth_signed: f64,
     /// Navigational azimuth in degrees eastward from north, in [0, 360).
     pub topocentric_azimuth: f64,

@@ -25,6 +25,7 @@ pub fn surface_incidence_angle(
 
     (sin_omega * sin_theta)
         .mul_add(cos_azimuth_difference, cos_theta * cos_omega)
+        .clamp(-1.0, 1.0)
         .acos()
         .to_degrees()
 }
@@ -113,6 +114,38 @@ mod tests {
         for &kappa in &[-180.0_f64, -1.0_f64, 1e-6_f64, 47.5_f64, 360.0_f64] {
             let shifted = surface_incidence_angle(50.0, 14.340_24 + kappa, 30.0, -10.0 + kappa);
             assert!((shifted - baseline).abs() < 1e-12_f64);
+        }
+    }
+
+    #[test]
+    fn aligned_and_antipodal_vectors_remain_finite() {
+        for theta in [0.015_f64, 26.477_169_330_695_055_f64] {
+            let aligned = surface_incidence_angle(theta, 0.0, theta, 0.0);
+            let opposite = surface_incidence_angle(theta, 0.0, 180.0 - theta, 180.0);
+            assert!(aligned.abs() < 2e-6_f64);
+            assert!((opposite - 180.0).abs() < 2e-6_f64);
+        }
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(surface_incidence_angle(invalid, 0.0, 0.0, 0.0).is_nan());
+        }
+    }
+
+    #[test]
+    fn surfaces_aligned_to_hourly_solar_positions_remain_finite() {
+        use crate::{Observer, SolarPosition, SpaDateTime, Surface};
+        use chrono::{TimeDelta, TimeZone, Utc};
+
+        let observer = Observer::try_at_sea_level_isa(0.0, 0.0).unwrap();
+        let start = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        for hour in 0..8760 {
+            let datetime = SpaDateTime::new(start + TimeDelta::hours(hour));
+            let position = SolarPosition::compute_with_delta_t(&datetime, 69.1, observer);
+            let surface = Surface::try_new(
+                position.topocentric_zenith,
+                position.astronomers_azimuth_signed,
+            )
+            .unwrap();
+            assert!(position.surface_incidence(surface).abs() < 2e-6_f64);
         }
     }
 }
