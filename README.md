@@ -17,7 +17,7 @@ high-precision solar calculations, faithful to Reda & Andreas,
   (sections 3.1 to 3.15, every intermediate quantity exposed on
   [`SolarPosition`]), incidence on tilted collectors (3.16), equation of
   time (appendix A.1), and sunrise, solar noon and sunset on [`SolarDay`]
-  (appendix A.2).
+  (refined from appendix A.2).
 - **Reference precision** — zenith and azimuth carry the paper's stated
   uncertainty of ±0.0003° over the years −2000 to 6000. Every periodic term
   of Tables A4.2 and A4.3 is transcribed digit-for-digit, and the test suite
@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!((position.surface_incidence(surface) - 25.18700).abs() < 1e-4);
 
     // Sunrise, solar noon and sunset on the civil day of the input,
-    // `None` on polar day or polar night.
+    // Each crossing is independently `None` when it does not occur.
     let day = SolarDay::compute_with_delta_t(&datetime, 67.0, observer)?;
     assert!(day.sunrise.unwrap() < day.transit);
     assert!(day.transit < day.sunset.unwrap());
