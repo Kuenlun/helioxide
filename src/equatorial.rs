@@ -38,6 +38,7 @@ pub fn geocentric_declination(
 
     (cos_beta * sin_epsilon)
         .mul_add(sin_lambda, sin_beta * cos_epsilon)
+        .clamp(-1.0, 1.0)
         .asin()
         .to_degrees()
 }
@@ -144,5 +145,14 @@ mod tests {
                 assert!((delta - expected).abs() < 1e-12_f64);
             }
         }
+    }
+
+    #[test]
+    fn declination_stays_finite_at_both_celestial_poles() {
+        for direction in [-1.0_f64, 1.0_f64] {
+            let declination = geocentric_declination(direction * 90.0, direction * 89.985, 0.015);
+            assert!(direction.mul_add(-90.0, declination).abs() < 1e-12_f64);
+        }
+        assert!(geocentric_declination(f64::NAN, 0.0, 0.0).is_nan());
     }
 }
