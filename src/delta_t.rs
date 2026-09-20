@@ -165,7 +165,7 @@ pub fn observed_delta_t_seconds_for_datetime<Tz: TimeZone>(datetime: &DateTime<T
     let idx = (i64::from(year) - i64::from(OBSERVED_BASE_YEAR)) * 12_i64
         + (i64::from(month) - i64::from(OBSERVED_BASE_MONTH));
     let idx = usize::try_from(idx).ok()?;
-    let [a, b] = OBSERVED_DELTA_T.get(idx..)?.first_chunk::<2>()?;
+    let (a, remaining) = OBSERVED_DELTA_T.get(idx..)?.split_first()?;
 
     let seconds_into_day =
         f64::from(naive.nanosecond()).mul_add(1.0e-9, f64::from(naive.num_seconds_from_midnight()));
@@ -173,6 +173,10 @@ pub fn observed_delta_t_seconds_for_datetime<Tz: TimeZone>(datetime: &DateTime<T
     let fraction =
         (day_of_month + seconds_into_day / SECONDS_PER_DAY) / f64::from(days_in_month(year, month));
 
+    if fraction == 0.0_f64 {
+        return Some(*a);
+    }
+    let b = remaining.first()?;
     Some((b - a).mul_add(fraction, *a))
 }
 
@@ -572,13 +576,17 @@ mod tests {
     }
 
     #[test]
-    fn observed_lookup_returns_none_at_and_after_last_sample() {
-        // The published window ends with the Apr 2026 sample; from there on we
-        // need the next month's value to interpolate, so the lookup fails.
+    fn observed_lookup_includes_the_last_sample_but_not_later_instants() {
         let last = Utc.with_ymd_and_hms(2_026, 4, 1, 0, 0, 0).unwrap();
-        assert!(observed_delta_t_seconds_for_datetime(&last).is_none());
-        let after = Utc.with_ymd_and_hms(2_030, 1, 1, 0, 0, 0).unwrap();
+        assert!(
+            (observed_delta_t_seconds_for_datetime(&last).unwrap() - 69.1330).abs() < f64::EPSILON
+        );
+        let after = last + chrono::TimeDelta::nanoseconds(1);
         assert!(observed_delta_t_seconds_for_datetime(&after).is_none());
+        let next_month = Utc.with_ymd_and_hms(2_026, 5, 1, 0, 0, 0).unwrap();
+        assert!(observed_delta_t_seconds_for_datetime(&next_month).is_none());
+        let much_later = Utc.with_ymd_and_hms(2_030, 1, 1, 0, 0, 0).unwrap();
+        assert!(observed_delta_t_seconds_for_datetime(&much_later).is_none());
     }
 
     #[test]
@@ -648,5 +656,20 @@ mod tests {
         assert!(!is_gregorian_leap_year(2_023));
         assert!(is_gregorian_leap_year(-4));
         assert!(!is_gregorian_leap_year(-1));
+    }
+
+    #[test]
+    fn automatic_position_uses_the_final_observation() {
+        use crate::{Observer, SolarPosition, SpaDateTime};
+
+        let date = SpaDateTime::new(Utc.with_ymd_and_hms(2026, 4, 1, 0, 0, 0).unwrap());
+        let observer = Observer::try_new(39.742_476, -105.1786, 1830.14, 820.0, 11.0).unwrap();
+        let position = SolarPosition::compute(&date, observer).unwrap();
+        assert!((position.topocentric_zenith - 74.689_387_349_685_79).abs() < 1e-7_f64);
+        assert!((position.topocentric_azimuth - 262.989_057_460_614_73).abs() < 1e-7_f64);
+        assert_eq!(
+            position,
+            SolarPosition::compute_with_delta_t(&date, 69.1330, observer).unwrap()
+        );
     }
 }
