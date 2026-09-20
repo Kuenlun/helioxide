@@ -61,7 +61,7 @@ pub fn approximate_sun_transit_time(
     let raw =
         (geocentric_right_ascension_at_0tt - observer_longitude - apparent_sidereal_time_at_0ut)
             / FULL_REVOLUTION_DEGREES;
-    raw.rem_euclid(1.0)
+    crate::helper::wrap_positive_period(raw, 1.0)
 }
 
 /// Local hour angle `H₀` at sun centre `h'₀`, or `None` for polar day/night.
@@ -91,8 +91,10 @@ pub fn approximate_sunrise_time(
     approximate_sun_transit_time: f64,
     sunrise_sunset_local_hour_angle: f64,
 ) -> f64 {
-    (approximate_sun_transit_time - sunrise_sunset_local_hour_angle / FULL_REVOLUTION_DEGREES)
-        .rem_euclid(1.0)
+    crate::helper::wrap_positive_period(
+        approximate_sun_transit_time - sunrise_sunset_local_hour_angle / FULL_REVOLUTION_DEGREES,
+        1.0,
+    )
 }
 
 /// `m₂ = m₀ + H₀ / 360`, wrapped into `[0, 1)`. Equation A6.
@@ -102,8 +104,10 @@ pub fn approximate_sunset_time(
     approximate_sun_transit_time: f64,
     sunrise_sunset_local_hour_angle: f64,
 ) -> f64 {
-    (approximate_sun_transit_time + sunrise_sunset_local_hour_angle / FULL_REVOLUTION_DEGREES)
-        .rem_euclid(1.0)
+    crate::helper::wrap_positive_period(
+        approximate_sun_transit_time + sunrise_sunset_local_hour_angle / FULL_REVOLUTION_DEGREES,
+        1.0,
+    )
 }
 
 /// `νᵢ = ν + 360.985647 · mᵢ` (degrees, signed, not wrapped). Equation A7.
@@ -1349,5 +1353,16 @@ mod tests {
             event_datetime(last_julian, &offset, 0.5),
             Err(SpaTimeError::EventOutOfRange)
         );
+    }
+
+    #[test]
+    fn approximate_events_exclude_one_under_negative_roundoff() {
+        for fraction in [
+            approximate_sun_transit_time(0.0, 1e-16, 0.0),
+            approximate_sunrise_time(0.0, 1e-16),
+            approximate_sunset_time(-1e-16, 0.0),
+        ] {
+            assert!((0.0_f64..1.0_f64).contains(&fraction));
+        }
     }
 }

@@ -68,8 +68,6 @@ pub fn topocentric_equatorial_coordinates(
         .to_degrees();
 
     TopocentricEquatorialCoordinates {
-        // Equation 38. `|Δα| ≤ ξ` is arc-second order, so the wrapped `α`
-        // stays inside `[0°, 360°)`.
         right_ascension: geocentric_right_ascension + delta_alpha,
         declination: delta_prime,
         parallax_in_right_ascension: delta_alpha,

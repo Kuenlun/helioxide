@@ -4,6 +4,8 @@
 
 //! Shared scalar helpers used across the SPA pipeline.
 
+const FULL_REVOLUTION_DEGREES: f64 = 360.0;
+
 /// `INT` of the NREL SPA paper: truncate towards zero.
 ///
 /// ```
@@ -21,9 +23,21 @@ pub const fn int(x: f64) -> f64 {
 #[inline]
 #[must_use]
 pub const fn limit_degrees(degrees: f64) -> f64 {
+    wrap_positive_period(degrees, FULL_REVOLUTION_DEGREES)
+}
+
+/// Wrap into `[0, period)` for a positive finite period, preserving non-finite inputs as NaN.
+#[inline]
+pub(crate) const fn wrap_positive_period(value: f64, period: f64) -> f64 {
     // Hand-rolled `rem_euclid` because the stdlib one is not yet `const`.
-    let r = degrees % 360.0_f64;
-    if r < 0.0 { r + 360.0 } else { r }
+    let remainder = value % period;
+    if remainder < 0.0 {
+        let wrapped = remainder + period;
+        // A tiny negative remainder can round up to the excluded endpoint.
+        if wrapped >= period { 0.0 } else { wrapped }
+    } else {
+        remainder
+    }
 }
 
 #[cfg(test)]
@@ -66,5 +80,21 @@ mod tests {
         assert_eq!(limit_degrees(-30.0), 330.0_f64);
         assert_eq!(limit_degrees(-720.0), 0.0_f64);
         assert_eq!(limit_degrees(-721.0), 359.0_f64);
+    }
+
+    #[test]
+    #[expect(
+        clippy::float_cmp,
+        reason = "Rounding at the excluded upper endpoint must produce exact zero."
+    )]
+    fn negative_roundoff_cannot_reach_the_excluded_full_revolution() {
+        for angle in [-1e-16_f64, -f64::MIN_POSITIVE, -f64::from_bits(1)] {
+            assert_eq!(limit_degrees(angle), 0.0_f64);
+        }
+        let below_full_revolution = 360.0_f64.next_down();
+        assert_eq!(limit_degrees(below_full_revolution), below_full_revolution);
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(limit_degrees(invalid).is_nan());
+        }
     }
 }
