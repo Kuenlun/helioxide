@@ -11,6 +11,7 @@ keywords = ["solar", "spa", "astronomy", "sun", "nrel"]
 categories = ["science", "mathematics"]
 
 [package.metadata.lockpick]
+locked = true
 license-header = ".github/license_header.rs"
 
 [package.metadata.lockpick.coverage]
