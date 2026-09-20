@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased](https://github.com/Kuenlun/helioxide/compare/v0.6.0...HEAD)
 
+## [0.7.0](https://github.com/Kuenlun/helioxide/compare/v0.6.0...v0.7.0) - 2026-09-20
+
+### Fixed
+
+- preserve angular boundary contracts ([#48](https://github.com/Kuenlun/helioxide/pull/48))
+- solve solar events on their actual dates ([#47](https://github.com/Kuenlun/helioxide/pull/47))
+- extend observed delta T through September 2026 ([#46](https://github.com/Kuenlun/helioxide/pull/46))
+- retain the final observed delta T sample ([#45](https://github.com/Kuenlun/helioxide/pull/45))
+- preserve calendar boundaries when converting Julian days ([#44](https://github.com/Kuenlun/helioxide/pull/44))
+- reject invalid SPA time and atmosphere inputs ([#43](https://github.com/Kuenlun/helioxide/pull/43))
+- bound solar angle roundoff and unify the horizon ([#42](https://github.com/Kuenlun/helioxide/pull/42))
+- enforce coverage through Lockpick ([#41](https://github.com/Kuenlun/helioxide/pull/41))
+
+### Other
+
+- pin check and release tool versions ([#49](https://github.com/Kuenlun/helioxide/pull/49))
+- harden Rust lint checks ([#40](https://github.com/Kuenlun/helioxide/pull/40))
+
 ## [0.6.0](https://github.com/Kuenlun/helioxide/compare/v0.5.1...v0.6.0) - 2026-06-10
 
 ### Added
