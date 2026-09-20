@@ -17,6 +17,12 @@ const LAST_JULIAN_DATE: (i32, u32, u32) = (1582, 10, 4);
 const FIRST_GREGORIAN_DATE: (i32, u32, u32) = (1582, 10, 15);
 const SECONDS_PER_DAY: f64 = 86_400.0;
 
+/// A full Gregorian year leaves several months between its start and the reform,
+/// so adjacent-day event and timezone shifts use Chrono's calendar directly.
+pub(crate) const fn is_fully_gregorian_year(year: i32) -> bool {
+    year > FIRST_GREGORIAN_DATE.0
+}
+
 pub(crate) fn is_gregorian_reform_gap(date: NaiveDate) -> bool {
     let fields = (date.year(), date.month(), date.day());
     fields > LAST_JULIAN_DATE && fields < FIRST_GREGORIAN_DATE
@@ -72,23 +78,43 @@ pub fn julian_day<Tz: TimeZone>(datetime: &SpaDateTime<Tz>) -> f64 {
 ///
 /// Equations A15 to A23.
 #[must_use]
+pub fn calendar_date_from_julian_day(julian_day: f64, tz: Tz) -> Option<DateTime<Tz>> {
+    let naive = calendar_datetime(julian_day, CalendarPrecision::Seconds)?;
+    project_calendar_datetime(naive, &tz)
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum CalendarPrecision {
+    Seconds,
+    Milliseconds,
+}
+
 #[expect(
     clippy::many_single_char_names,
     clippy::cast_possible_truncation,
     clippy::as_conversions,
     reason = "The SPA equations round or truncate floating-point calendar components before validation."
 )]
-pub fn calendar_date_from_julian_day(julian_day: f64, tz: Tz) -> Option<DateTime<Tz>> {
+pub(crate) fn calendar_datetime(
+    julian_day: f64,
+    precision: CalendarPrecision,
+) -> Option<NaiveDateTime> {
     if !julian_day.is_finite() {
         return None;
     }
     let jd_plus_half = julian_day + 0.5_f64;
     let unrounded_day = jd_plus_half.floor();
-    let rounded_seconds = ((jd_plus_half - unrounded_day) * SECONDS_PER_DAY).round();
+    let milliseconds_per_tick = match precision {
+        CalendarPrecision::Seconds => 1000.0_f64,
+        CalendarPrecision::Milliseconds => 1.0_f64,
+    };
+    let ticks_per_day = SECONDS_PER_DAY * 1000.0_f64 / milliseconds_per_tick;
+    let rounded_ticks = ((jd_plus_half - unrounded_day) * ticks_per_day).round();
     // Advance the astronomical day before decoding its calendar label.
     // Chrono's next Gregorian date can skip a Julian leap day or enter the reform gap.
-    let z = unrounded_day + (rounded_seconds / SECONDS_PER_DAY).floor();
-    let seconds_into_day = rounded_seconds.rem_euclid(SECONDS_PER_DAY) as i64;
+    let z = unrounded_day + (rounded_ticks / ticks_per_day).floor();
+    let milliseconds_into_day =
+        (rounded_ticks.rem_euclid(ticks_per_day) * milliseconds_per_tick) as i64;
 
     let a = if z < GREGORIAN_REFORM_Z {
         z
@@ -116,12 +142,12 @@ pub fn calendar_date_from_julian_day(julian_day: f64, tz: Tz) -> Option<DateTime
     };
 
     let day_int = day_decimal as i32;
-    NaiveDate::from_ymd_opt(year, month.cast_unsigned(), day_int.cast_unsigned()).and_then(|date| {
+    NaiveDate::from_ymd_opt(year, month.cast_unsigned(), day_int.cast_unsigned()).map(|date| {
         // The carry was applied to Z, leaving fewer than 86400 seconds.
         let time = NaiveTime::MIN
-            .overflowing_add_signed(TimeDelta::seconds(seconds_into_day))
+            .overflowing_add_signed(TimeDelta::milliseconds(milliseconds_into_day))
             .0;
-        project_calendar_datetime(NaiveDateTime::new(date, time), &tz)
+        NaiveDateTime::new(date, time)
     })
 }
 
@@ -132,6 +158,9 @@ pub(crate) fn project_calendar_datetime<Tz: TimeZone>(
     let local = Utc.from_utc_datetime(&naive).with_timezone(tz);
     let offset = local.offset().fix();
     let local_naive = naive.checked_add_offset(offset)?;
+    if is_fully_gregorian_year(naive.year()) {
+        return Some(local);
+    }
     // Chrono cannot project across a missing mixed-calendar day. Compare the
     // labels' Julian days, allowing subsecond rounding but no whole-day mismatch.
     let utc_jd = julian_day(&SpaDateTime::new(naive.and_utc()));
@@ -402,6 +431,7 @@ mod tests {
                 .contains("1582")
         );
     }
+
     #[test]
     fn negative_julian_days_preserve_dates_and_nonnegative_time_fractions() {
         for year in [-262_142_i32, -10_000_i32, -5000_i32] {

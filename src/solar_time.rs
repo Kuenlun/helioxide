@@ -4,16 +4,15 @@
 
 //! Sun transit, sunrise and sunset for a given civil day. Appendix A.2.
 //!
-//! [`SolarDay::compute`] anchors `D₀` on the local civil date of the input
-//! (section 3.1.1 allows driving JD from local time and section A.3 confirms
-//! the same shift on read-out), so the three returned events fall on the
-//! input's local civil date when the timezone tracks the observer.
+//! [`SolarDay::compute`] selects a transit from the input's local civil date.
+//! Horizon crossings use their actual dates and can lie on an adjacent civil
+//! day. Each crossing is optional independently at polar transitions.
 
 use core::fmt;
 
 use crate::time::{SpaTimeError, validate_spa_time};
 
-use chrono::{DateTime, MappedLocalTime, TimeDelta, TimeZone, Utc};
+use chrono::{DateTime, Datelike, MappedLocalTime, Offset, TimeDelta, TimeZone, Utc};
 
 use crate::SpaDateTime;
 use crate::apparent::{aberration_correction, apparent_sun_longitude};
@@ -220,17 +219,18 @@ pub fn sunrise_or_sunset_time(
     approximate_event_time + (sun_altitude_at_event - sun_horizon_elevation) / denominator
 }
 
-/// Sun transit (solar noon), sunrise and sunset for a single civil day.
+/// Sun transit and its associated rising and setting horizon crossings.
 ///
-/// `sunrise` and `sunset` are `None` for polar day or polar night. `transit`
-/// is always populated.
+/// Each horizon crossing is optional independently, including polar transitions
+/// with only one event. Events belong to the solar rotation around the selected
+/// transit and can cross a civil date boundary. `transit` is always populated.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SolarDay<Tz: TimeZone> {
     /// Solar noon in the input timezone.
     pub transit: DateTime<Tz>,
-    /// Sunrise in the input timezone, absent during polar day or night.
+    /// Sunrise in the input timezone, absent when no corresponding horizon crossing occurs.
     pub sunrise: Option<DateTime<Tz>>,
-    /// Sunset in the input timezone, absent during polar day or night.
+    /// Sunset in the input timezone, absent when no corresponding horizon crossing occurs.
     pub sunset: Option<DateTime<Tz>>,
     /// Sun altitude at transit (degrees, in `[-90°, 90°]`). Equation A12.
     pub sun_transit_altitude: f64,
@@ -241,7 +241,11 @@ pub struct SolarDay<Tz: TimeZone> {
 }
 
 impl<Tz: TimeZone> SolarDay<Tz> {
-    /// Run appendix A.2 end to end.
+    /// Refine the appendix A.2 event geometry on the actual event dates.
+    ///
+    /// Horizon crossings are bracketed around the daily altitude maximum.
+    /// The position equations and three-point interpolation are retained,
+    /// with iterative refinement replacing the single A14 correction.
     ///
     /// `D₀` is the local civil date of `datetime` in its own timezone, and
     /// the result is rendered on the same timezone. Pass a [`DateTime<Utc>`]
@@ -283,7 +287,7 @@ impl<Tz: TimeZone> SolarDay<Tz> {
     ) -> Result<Self, SpaTimeError> {
         validate_spa_time(datetime, delta_t_seconds)?;
         let tz = datetime.datetime().timezone();
-        let utc_anchor = local_civil_midnight_in_utc(datetime.datetime());
+        let utc_anchor = local_civil_day_anchor(datetime.datetime());
         let datetime_at_anchor = datetime.with_datetime(utc_anchor);
 
         // Step A.2.1: ν at the anchor.
@@ -295,57 +299,21 @@ impl<Tz: TimeZone> SolarDay<Tz> {
         let epsilon_0 = true_obliquity_of_ecliptic(jme_0, delta_epsilon_0);
         let nu = apparent_sidereal_time(mean_sidereal_time(jd_0), delta_psi_0, epsilon_0);
 
-        // Step A.2.2: (α, δ) at 0 TT on D₋₁, D₀, D₊₁. Midnight TT has
-        // JDE = jd_0 exactly (the reference implementation zeroes ΔT here),
-        // and ΔT enters once through `nᵢ` in equation A8; tabulating at
-        // `jde_0` would count it twice.
-        let (alpha_minus, delta_minus) = right_ascension_and_declination(jd_0 - 1.0);
-        let (alpha_zero, delta_zero) = right_ascension_and_declination(jd_0);
-        let (alpha_plus, delta_plus) = right_ascension_and_declination(jd_0 + 1.0);
-
-        // Step A.2.3: m₀.
-        let m_0 = approximate_sun_transit_time(alpha_zero, observer.longitude(), nu);
-
-        // Step A.2.4: H₀ (None for polar day/night).
-        let h_0 = sunrise_sunset_local_hour_angle(
-            observer.latitude(),
-            delta_zero,
-            SUN_ELEVATION_AT_HORIZON_DEGREES,
-        );
-
-        let transit_event = refined_event_fraction_of_day(
-            EventKind::Transit,
-            m_0,
-            nu,
-            observer,
-            delta_t_seconds,
-            (alpha_minus, alpha_zero, alpha_plus),
-            (delta_minus, delta_zero, delta_plus),
-        );
-
-        let (sunrise_event, sunset_event) = h_0.map_or((None, None), |h0| {
-            let m_1 = approximate_sunrise_time(m_0, h0);
-            let m_2 = approximate_sunset_time(m_0, h0);
-            let r = refined_event_fraction_of_day(
-                EventKind::Sunrise,
-                m_1,
-                nu,
-                observer,
-                delta_t_seconds,
-                (alpha_minus, alpha_zero, alpha_plus),
-                (delta_minus, delta_zero, delta_plus),
-            );
-            let s = refined_event_fraction_of_day(
-                EventKind::Sunset,
-                m_2,
-                nu,
-                observer,
-                delta_t_seconds,
-                (alpha_minus, alpha_zero, alpha_plus),
-                (delta_minus, delta_zero, delta_plus),
-            );
-            (Some(r), Some(s))
-        });
+        // Centre the TT samples on civil midday so both adjacent events
+        // stay near the interpolation nodes, even when they cross UTC midnight.
+        let (alpha_minus, delta_minus) = right_ascension_and_declination(jde_0 - 0.5);
+        let (alpha_zero, delta_zero) = right_ascension_and_declination(jde_0 + 0.5);
+        let (alpha_plus, delta_plus) = right_ascension_and_declination(jde_0 + 1.5);
+        let model = EventModel {
+            sidereal: nu,
+            alpha: (alpha_minus, alpha_zero, alpha_plus),
+            delta: (delta_minus, delta_zero, delta_plus),
+            latitude_sin_cos: observer.latitude().to_radians().sin_cos(),
+            horizon_sine: SUN_ELEVATION_AT_HORIZON_DEGREES.to_radians().sin(),
+            longitude: observer.longitude(),
+        };
+        let transit_event = model.transit();
+        let (sunrise_event, sunset_event) = model.horizon_events(transit_event.fraction_of_day);
 
         Self::from_events(
             utc_anchor,
@@ -365,20 +333,7 @@ impl<Tz: TimeZone> SolarDay<Tz> {
         sunrise_event: Option<RefinedEvent>,
         sunset_event: Option<RefinedEvent>,
     ) -> Result<Self, SpaTimeError> {
-        // Wrap T into [0, 1) and unwrap R, S to the closest representative
-        // around T, preserving sunrise < transit < sunset across day boundaries.
-        let transit_wrapped = transit_event.fraction_of_day.rem_euclid(1.0);
         let to_datetime = |fraction| event_datetime(utc_anchor, timezone, fraction);
-        let unwrap_to_transit = |fraction: f64| -> f64 {
-            let raw = fraction - transit_wrapped;
-            if raw > 0.5_f64 {
-                fraction - 1.0_f64
-            } else if raw < -0.5_f64 {
-                fraction + 1.0_f64
-            } else {
-                fraction
-            }
-        };
 
         let sun_transit_altitude = sun_altitude_at_event(
             latitude,
@@ -387,12 +342,12 @@ impl<Tz: TimeZone> SolarDay<Tz> {
         );
 
         Ok(Self {
-            transit: to_datetime(transit_wrapped)?,
+            transit: to_datetime(transit_event.fraction_of_day)?,
             sunrise: sunrise_event
-                .map(|r| to_datetime(unwrap_to_transit(r.fraction_of_day)))
+                .map(|r| to_datetime(r.fraction_of_day))
                 .transpose()?,
             sunset: sunset_event
-                .map(|s| to_datetime(unwrap_to_transit(s.fraction_of_day)))
+                .map(|s| to_datetime(s.fraction_of_day))
                 .transpose()?,
             sun_transit_altitude,
             sunrise_hour_angle: sunrise_event.map(|r| r.local_hour_angle),
@@ -409,16 +364,22 @@ fn event_datetime<Tz: TimeZone>(
     if !(-1.0_f64..=2.0_f64).contains(&fraction_of_day) {
         return Err(SpaTimeError::EventOutOfRange);
     }
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::as_conversions,
-        reason = "A validated fraction in [-1, 2] rounds to at most 172800000 milliseconds, within i64."
-    )]
-    let milliseconds = (fraction_of_day * (SECONDS_PER_DAY * 1000.0)).round() as i64;
-    utc_anchor
-        .checked_add_signed(TimeDelta::milliseconds(milliseconds))
-        .map(|datetime| datetime.with_timezone(timezone))
-        .ok_or(SpaTimeError::EventOutOfRange)
+    let naive = if crate::julian::is_fully_gregorian_year(utc_anchor.year()) {
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::as_conversions,
+            reason = "A validated fraction in [-1, 2] rounds to at most 172800000 milliseconds, within i64."
+        )]
+        let milliseconds = (fraction_of_day * (SECONDS_PER_DAY * 1000.0)).round() as i64;
+        utc_anchor.naive_utc().checked_add_signed(TimeDelta::milliseconds(milliseconds))
+    } else {
+        let anchor_jd = julian_day(&SpaDateTime::new(utc_anchor));
+        crate::julian::calendar_datetime(
+            anchor_jd + fraction_of_day,
+            crate::julian::CalendarPrecision::Milliseconds,
+        )
+    }.ok_or(SpaTimeError::EventOutOfRange)?;
+    crate::julian::project_calendar_datetime(naive, timezone).ok_or(SpaTimeError::EventOutOfRange)
 }
 
 impl<Tz: TimeZone> fmt::Display for SolarDay<Tz>
@@ -428,31 +389,34 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.sunrise {
             Some(sunrise) => writeln!(f, "Sunrise:                {sunrise}")?,
-            None => writeln!(f, "Sunrise:                none (polar day or polar night)")?,
+            None => writeln!(f, "Sunrise:                none (no horizon crossing)")?,
         }
         writeln!(f, "Sun transit:            {}", self.transit)?;
         match &self.sunset {
             Some(sunset) => writeln!(f, "Sunset:                 {sunset}")?,
-            None => writeln!(f, "Sunset:                 none (polar day or polar night)")?,
+            None => writeln!(f, "Sunset:                 none (no horizon crossing)")?,
         }
         match self.sunrise_hour_angle {
             Some(hour_angle) => writeln!(f, "Sunrise hour angle:     {hour_angle}°")?,
-            None => writeln!(f, "Sunrise hour angle:     none (polar day or polar night)")?,
+            None => writeln!(f, "Sunrise hour angle:     none (no horizon crossing)")?,
         }
         match self.sunset_hour_angle {
             Some(hour_angle) => writeln!(f, "Sunset hour angle:      {hour_angle}°")?,
-            None => writeln!(f, "Sunset hour angle:      none (polar day or polar night)")?,
+            None => writeln!(f, "Sunset hour angle:      none (no horizon crossing)")?,
         }
         write!(f, "Sun transit altitude:   {}°", self.sun_transit_altitude)
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EventKind {
-    Transit,
-    Sunrise,
-    Sunset,
-}
+/// A one-day bracket shrinks below 0.021 ms after 32 bisections.
+const EVENT_REFINEMENT_STEPS: usize = 32;
+/// Ordinary crossings converge quickly; bisection remains the bounded fallback.
+const NEWTON_REFINEMENT_STEPS: usize = 6;
+/// Keep solver steps well below the millisecond timestamp rounding.
+const EVENT_TIME_TOLERANCE_DAYS: f64 = 0.000_125 / SECONDS_PER_DAY;
+/// Four A13 corrections reduce the transit residual below millisecond output precision.
+const TRANSIT_REFINEMENT_STEPS: usize = 4;
+const GOLDEN_SECTION_RATIO: f64 = 0.618_033_988_749_894_9;
 
 #[derive(Debug, Clone, Copy)]
 struct RefinedEvent {
@@ -461,61 +425,196 @@ struct RefinedEvent {
     interpolated_declination: f64,
 }
 
-#[expect(
-    clippy::similar_names,
-    reason = "Keep the parameter names and grouping used by the SPA equations."
-)]
-fn refined_event_fraction_of_day(
-    kind: EventKind,
-    approximate_event_time: f64,
-    apparent_sidereal_time_at_0ut: f64,
-    observer: Observer,
-    delta_t_seconds: f64,
-    alpha_three_day: (f64, f64, f64),
-    delta_three_day: (f64, f64, f64),
-) -> RefinedEvent {
-    let m = approximate_event_time;
-    let nu_i = sidereal_time_at_event(apparent_sidereal_time_at_0ut, m);
-    let n_i = delta_t_corrected_event_time(m, delta_t_seconds);
-    let (alpha_minus, alpha_zero, alpha_plus) = alpha_three_day;
-    let (delta_minus, delta_zero, delta_plus) = delta_three_day;
-    let alpha_prime = interpolate_three_day_value(alpha_minus, alpha_zero, alpha_plus, n_i);
-    let delta_prime = interpolate_three_day_value(delta_minus, delta_zero, delta_plus, n_i);
-    let h_prime = event_local_hour_angle(nu_i, observer.longitude(), alpha_prime);
+struct EventModel {
+    sidereal: f64,
+    alpha: (f64, f64, f64),
+    delta: (f64, f64, f64),
+    latitude_sin_cos: (f64, f64),
+    horizon_sine: f64,
+    longitude: f64,
+}
 
-    let fraction_of_day = match kind {
-        EventKind::Transit => sun_transit_time(m, h_prime),
-        EventKind::Sunrise | EventKind::Sunset => {
-            let h_at_event = sun_altitude_at_event(observer.latitude(), delta_prime, h_prime);
-            sunrise_or_sunset_time(
-                m,
-                h_at_event,
-                SUN_ELEVATION_AT_HORIZON_DEGREES,
-                delta_prime,
-                observer.latitude(),
-                h_prime,
-            )
+impl EventModel {
+    fn coordinates_at(&self, fraction: f64) -> RefinedEvent {
+        let offset_from_midday = fraction - 0.5_f64;
+        let (alpha_minus, alpha_zero, alpha_plus) = self.alpha;
+        let (delta_minus, delta_zero, delta_plus) = self.delta;
+        let right_ascension =
+            interpolate_three_day_value(alpha_minus, alpha_zero, alpha_plus, offset_from_midday);
+        let declination =
+            interpolate_three_day_value(delta_minus, delta_zero, delta_plus, offset_from_midday);
+        RefinedEvent {
+            fraction_of_day: fraction,
+            local_hour_angle: event_local_hour_angle(
+                sidereal_time_at_event(self.sidereal, fraction),
+                self.longitude,
+                right_ascension,
+            ),
+            interpolated_declination: declination,
         }
-    };
+    }
 
-    RefinedEvent {
-        fraction_of_day,
-        local_hour_angle: h_prime,
-        interpolated_declination: delta_prime,
+    fn altitude_sine_at(&self, fraction: f64) -> f64 {
+        self.altitude_sine_and_rate_at(fraction).0
+    }
+
+    fn altitude_rate_at(&self, fraction: f64) -> f64 {
+        self.altitude_sine_and_rate_at(fraction).1
+    }
+
+    // The derivative of sin(altitude) has the same sign as the altitude rate.
+    #[inline]
+    fn altitude_sine_and_rate_at(&self, fraction: f64) -> (f64, f64) {
+        let event = self.coordinates_at(fraction);
+        let (sin_phi, cos_phi) = self.latitude_sin_cos;
+        let (sin_delta, cos_delta) = event.interpolated_declination.to_radians().sin_cos();
+        let (sin_hour, cos_hour) = event.local_hour_angle.to_radians().sin_cos();
+        let offset = fraction - 0.5_f64;
+        let declination_rate = interpolation_rate(self.delta, offset).to_radians();
+        let hour_rate = (EARTH_SIDEREAL_DAILY_ROTATION_DEGREES
+            - interpolation_rate(self.alpha, offset))
+        .to_radians();
+        let altitude_sine = (cos_phi * cos_delta).mul_add(cos_hour, sin_phi * sin_delta);
+        let rate = (cos_phi * cos_delta * sin_hour).mul_add(
+            -hour_rate,
+            declination_rate * (cos_phi * sin_delta).mul_add(-cos_hour, sin_phi * cos_delta),
+        );
+        (altitude_sine, rate)
+    }
+
+    fn transit(&self) -> RefinedEvent {
+        let (minus, zero, plus) = self.alpha;
+        let right_ascension = interpolate_three_day_value(minus, zero, plus, -0.5_f64);
+        let mut fraction =
+            approximate_sun_transit_time(right_ascension, self.longitude, self.sidereal);
+        for _ in 0..TRANSIT_REFINEMENT_STEPS {
+            fraction = sun_transit_time(fraction, self.coordinates_at(fraction).local_hour_angle);
+        }
+        self.coordinates_at(fraction)
+    }
+
+    fn horizon_events(&self, transit: f64) -> (Option<RefinedEvent>, Option<RefinedEvent>) {
+        let lower = transit - 0.5_f64;
+        let upper = transit + 0.5_f64;
+        let horizon = self.horizon_sine;
+        if self.altitude_sine_at(lower) < horizon
+            && self.altitude_sine_at(transit) > horizon
+            && self.altitude_sine_at(upper) < horizon
+        {
+            return (
+                self.crossing(lower, transit, true),
+                self.crossing(transit, upper, false),
+            );
+        }
+
+        // Close to a pole the seasonal motion can dominate the daily rotation.
+        let morning_rate = self.altitude_rate_at(transit - 0.25_f64);
+        let evening_rate = self.altitude_rate_at(transit + 0.25_f64);
+        if morning_rate > 0.0_f64 && evening_rate > 0.0_f64 {
+            return (self.crossing(lower, upper, true), None);
+        }
+        if morning_rate < 0.0_f64 && evening_rate < 0.0_f64 {
+            return (None, self.crossing(lower, upper, false));
+        }
+
+        // Near a grazing horizon, actual extrema drift away from meridian
+        // crossings. Find them before bracketing either event independently.
+        let minimum_before = self.extremum(transit - 0.75_f64, transit - 0.25_f64, false);
+        let maximum = self.extremum(transit - 0.25_f64, transit + 0.25_f64, true);
+        let minimum_after = self.extremum(transit + 0.25_f64, transit + 0.75_f64, false);
+        (
+            self.crossing(minimum_before, maximum, true),
+            self.crossing(maximum, minimum_after, false),
+        )
+    }
+
+    fn crossing(&self, mut lower: f64, mut upper: f64, rising: bool) -> Option<RefinedEvent> {
+        let lower_height = self.altitude_sine_at(lower) - self.horizon_sine;
+        let upper_height = self.altitude_sine_at(upper) - self.horizon_sine;
+        let brackets_rise = lower_height < 0.0_f64 && upper_height > 0.0_f64;
+        let brackets_set = lower_height > 0.0_f64 && upper_height < 0.0_f64;
+        if !(if rising { brackets_rise } else { brackets_set }) {
+            return None;
+        }
+        let mut estimate = f64::midpoint(lower, upper);
+        for _ in 0..NEWTON_REFINEMENT_STEPS {
+            let (height, rate) = self.altitude_sine_and_rate_at(estimate);
+            let residual = height - self.horizon_sine;
+            if residual == 0.0_f64 {
+                return Some(self.coordinates_at(estimate));
+            }
+            let candidate = estimate - residual / rate;
+            if (candidate - estimate).abs() <= EVENT_TIME_TOLERANCE_DAYS {
+                return Some(self.coordinates_at(candidate.clamp(lower, upper)));
+            }
+            if (height < self.horizon_sine) == rising {
+                lower = estimate;
+            } else {
+                upper = estimate;
+            }
+            // Projection preserves the bracket even when a small slope sends
+            // Newton outside it. Bisection still bounds the remaining error.
+            estimate = candidate.clamp(lower, upper);
+        }
+        for _ in 0..EVENT_REFINEMENT_STEPS {
+            let middle = f64::midpoint(lower, upper);
+            if (self.altitude_sine_at(middle) < self.horizon_sine) == rising {
+                lower = middle;
+            } else {
+                upper = middle;
+            }
+        }
+        Some(self.coordinates_at(f64::midpoint(lower, upper)))
+    }
+
+    fn extremum(&self, mut lower: f64, mut upper: f64, maximum: bool) -> f64 {
+        let mut left = GOLDEN_SECTION_RATIO.mul_add(-(upper - lower), upper);
+        let mut right = GOLDEN_SECTION_RATIO.mul_add(upper - lower, lower);
+        let mut left_height = self.altitude_sine_at(left);
+        let mut right_height = self.altitude_sine_at(right);
+        for _ in 0..EVENT_REFINEMENT_STEPS {
+            if (left_height < right_height) == maximum {
+                lower = left;
+                left = right;
+                left_height = right_height;
+                right = GOLDEN_SECTION_RATIO.mul_add(upper - lower, lower);
+                right_height = self.altitude_sine_at(right);
+            } else {
+                upper = right;
+                right = left;
+                right_height = left_height;
+                left = GOLDEN_SECTION_RATIO.mul_add(-(upper - lower), upper);
+                left_height = self.altitude_sine_at(left);
+            }
+        }
+        f64::midpoint(lower, upper)
     }
 }
 
-/// UT instant of local civil midnight at the start of `datetime`'s local date.
+fn interpolation_rate((minus, zero, plus): (f64, f64, f64), offset: f64) -> f64 {
+    let previous_difference = wrap_interpolation_difference(zero - minus);
+    let next_difference = wrap_interpolation_difference(plus - zero);
+    (next_difference - previous_difference)
+        .mul_add(offset, f64::midpoint(previous_difference, next_difference))
+}
+
+/// UTC anchor for the input local civil date.
 ///
 /// DST corner cases:
 /// * `Ambiguous` (fall back over midnight): take the earliest representation.
-/// * `None` (spring forward over midnight): reinterpret naive local midnight
-///   as UT, so events may be off by the DST gap on the input's wall clock.
-fn local_civil_midnight_in_utc<Tz: TimeZone>(datetime: &DateTime<Tz>) -> DateTime<Utc> {
+/// * `None` (skipped midnight): extrapolate the input instant's offset to midnight.
+fn local_civil_day_anchor<Tz: TimeZone>(datetime: &DateTime<Tz>) -> DateTime<Utc> {
     let local_midnight = datetime.date_naive().and_time(chrono::NaiveTime::MIN);
     match datetime.timezone().from_local_datetime(&local_midnight) {
         MappedLocalTime::Single(t) | MappedLocalTime::Ambiguous(t, _) => t.with_timezone(&Utc),
-        MappedLocalTime::None => local_midnight.and_utc(),
+        MappedLocalTime::None => {
+            #[expect(
+                clippy::arithmetic_side_effects,
+                reason = "The caller validates UTC years -2000..=6000; a civil offset smaller than one day stays far inside Chrono's range."
+            )]
+            let anchor = local_midnight - datetime.offset().fix();
+            anchor.and_utc()
+        }
     }
 }
 
@@ -545,12 +644,12 @@ fn right_ascension_and_declination(julian_ephemeris_day: f64) -> (f64, f64) {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
-        EARTH_SIDEREAL_DAILY_ROTATION_DEGREES, EventKind, SUN_ELEVATION_AT_HORIZON_DEGREES,
-        SolarDay, approximate_sun_transit_time, approximate_sunrise_time, approximate_sunset_time,
+        EARTH_SIDEREAL_DAILY_ROTATION_DEGREES, SUN_ELEVATION_AT_HORIZON_DEGREES, SolarDay,
+        approximate_sun_transit_time, approximate_sunrise_time, approximate_sunset_time,
         delta_t_corrected_event_time, event_local_hour_angle, interpolate_three_day_value,
-        refined_event_fraction_of_day, right_ascension_and_declination, sidereal_time_at_event,
-        sun_altitude_at_event, sun_transit_time, sunrise_or_sunset_time,
-        sunrise_sunset_local_hour_angle, wrap_interpolation_difference,
+        right_ascension_and_declination, sidereal_time_at_event, sun_altitude_at_event,
+        sun_transit_time, sunrise_or_sunset_time, sunrise_sunset_local_hour_angle,
+        wrap_interpolation_difference,
     };
     use crate::spa::Observer;
     use crate::test_fixtures::{
@@ -603,19 +702,8 @@ mod tests {
         .unwrap()
     }
 
-    fn fraction_to_clock_seconds(fraction_of_day: f64) -> i64 {
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::as_conversions,
-            reason = "The SPA equations round or truncate floating-point calendar components before validation."
-        )]
-        {
-            (fraction_of_day * 86_400.0).round() as i64
-        }
-    }
-
     #[test]
-    fn solar_day_matches_table_a5_1() {
+    fn reference_site_events_use_their_actual_horizon_crossing_dates() {
         let day = reference_solar_day();
         let utc_midnight = Utc.with_ymd_and_hms(2003, 10, 17, 0, 0, 0).unwrap();
 
@@ -632,12 +720,12 @@ mod tests {
             + chrono::TimeDelta::milliseconds(460);
         assert!((sunrise - expected_sunrise).num_milliseconds().abs() < 50);
 
-        // Sunset: 00:20:19.19 UT on Oct 18.
+        // Sunset on Oct 18 must use that day's coordinates: 00:18:51.74 UT.
         let sunset = day.sunset.unwrap();
         let expected_sunset = utc_midnight
             + chrono::TimeDelta::days(1)
-            + chrono::TimeDelta::seconds(1_219)
-            + chrono::TimeDelta::milliseconds(190);
+            + chrono::TimeDelta::seconds(1_131)
+            + chrono::TimeDelta::milliseconds(740);
         assert!((sunset - expected_sunset).num_milliseconds().abs() < 50);
     }
 
@@ -682,9 +770,9 @@ mod tests {
         assert!((day.transit - expected_transit).num_milliseconds().abs() < 100);
 
         let expected_sunset = chrono_tz::Europe::Madrid
-            .with_ymd_and_hms(2003, 10, 18, 2, 20, 19)
+            .with_ymd_and_hms(2003, 10, 18, 2, 18, 51)
             .unwrap()
-            + chrono::TimeDelta::milliseconds(190);
+            + chrono::TimeDelta::milliseconds(740);
         assert!(
             (day.sunset.unwrap() - expected_sunset)
                 .num_milliseconds()
@@ -735,6 +823,10 @@ mod tests {
         // Sao_Paulo sprang forward at midnight 2017-10-15: no UT representation.
         let sao_paulo = chrono_tz::America::Sao_Paulo;
         let dt = SpaDateTime::new(sao_paulo.with_ymd_and_hms(2017, 10, 15, 12, 0, 0).unwrap());
+        assert_eq!(
+            super::local_civil_day_anchor(dt.datetime()),
+            Utc.with_ymd_and_hms(2017, 10, 15, 2, 0, 0).unwrap()
+        );
         let observer = Observer::try_new(-23.533, -46.625, 760.0, 1010.0, 22.0).unwrap();
         let day = SolarDay::compute_with_delta_t(&dt, REFERENCE_DELTA_T_SECONDS, observer).unwrap();
         assert!(day.sunrise.unwrap() < day.transit);
@@ -1001,87 +1093,7 @@ mod tests {
     }
 
     #[test]
-    #[expect(
-        clippy::similar_names,
-        reason = "Keep the parameter names and grouping used by the SPA equations."
-    )]
-    fn refined_event_fraction_dispatches_on_event_kind() {
-        let observer = reference_observer();
-        let utc_midnight = SpaDateTime::new(Utc.with_ymd_and_hms(2003, 10, 17, 0, 0, 0).unwrap());
-        let jd_0 = julian::julian_day(&utc_midnight);
-        let jde_0 = julian::julian_ephemeris_day(jd_0, REFERENCE_DELTA_T_SECONDS);
-        let jce_0 = julian::julian_ephemeris_century(jde_0);
-        let jme_0 = julian::julian_ephemeris_millennium(jce_0);
-        let (delta_psi_0, delta_epsilon_0) =
-            crate::nutation::nutation_in_longitude_and_obliquity(jce_0);
-        let epsilon_0 = crate::obliquity::true_obliquity_of_ecliptic(jme_0, delta_epsilon_0);
-        let nu = crate::sidereal::apparent_sidereal_time(
-            crate::sidereal::mean_sidereal_time(jd_0),
-            delta_psi_0,
-            epsilon_0,
-        );
-        let (alpha_minus, delta_minus) = right_ascension_and_declination(jd_0 - 1.0);
-        let (alpha_zero, delta_zero) = right_ascension_and_declination(jd_0);
-        let (alpha_plus, delta_plus) = right_ascension_and_declination(jd_0 + 1.0);
-
-        let m_0 = approximate_sun_transit_time(alpha_zero, observer.longitude(), nu);
-        let h_0 = sunrise_sunset_local_hour_angle(
-            observer.latitude(),
-            delta_zero,
-            SUN_ELEVATION_AT_HORIZON_DEGREES,
-        )
-        .unwrap();
-
-        let transit = refined_event_fraction_of_day(
-            EventKind::Transit,
-            m_0,
-            nu,
-            observer,
-            REFERENCE_DELTA_T_SECONDS,
-            (alpha_minus, alpha_zero, alpha_plus),
-            (delta_minus, delta_zero, delta_plus),
-        );
-        let sunrise = refined_event_fraction_of_day(
-            EventKind::Sunrise,
-            approximate_sunrise_time(m_0, h_0),
-            nu,
-            observer,
-            REFERENCE_DELTA_T_SECONDS,
-            (alpha_minus, alpha_zero, alpha_plus),
-            (delta_minus, delta_zero, delta_plus),
-        );
-        let sunset = refined_event_fraction_of_day(
-            EventKind::Sunset,
-            approximate_sunset_time(m_0, h_0),
-            nu,
-            observer,
-            REFERENCE_DELTA_T_SECONDS,
-            (alpha_minus, alpha_zero, alpha_plus),
-            (delta_minus, delta_zero, delta_plus),
-        );
-
-        let close = |actual: i64, expected: i64| (actual - expected).abs() <= 1;
-        assert!(close(
-            fraction_to_clock_seconds(transit.fraction_of_day),
-            67_565
-        ));
-        assert!(close(
-            fraction_to_clock_seconds(sunrise.fraction_of_day),
-            47_563
-        ));
-        assert!(close(
-            fraction_to_clock_seconds(sunset.fraction_of_day),
-            1_219
-        ));
-
-        assert!(transit.local_hour_angle.abs() < 0.1_f64);
-        assert!(sunrise.local_hour_angle < 0.0_f64);
-        assert!(sunset.local_hour_angle > 0.0_f64);
-        assert!((transit.interpolated_declination - delta_zero).abs() < 1.0_f64);
-    }
-
-    #[test]
-    fn solar_day_unwraps_sunrise_to_previous_ut_day_for_east_observer() {
+    fn solar_day_places_sunrise_on_previous_utc_date_for_east_observer() {
         let observer = Observer::try_new(-33.8, 150.0, 0.0, 1010.0, 18.0).unwrap();
         let utc_noon = SpaDateTime::new(Utc.with_ymd_and_hms(2026, 3, 20, 12, 0, 0).unwrap());
         let day = SolarDay::compute_with_delta_t(&utc_noon, 70.0, observer).unwrap();
@@ -1104,7 +1116,7 @@ mod tests {
         assert!(rendered.starts_with("Sunrise:"));
         assert!(rendered.contains("Sun transit:"));
         assert!(rendered.contains("Sunset:"));
-        assert!(!rendered.contains("none (polar day or polar night)"));
+        assert!(!rendered.contains("none (no horizon crossing)"));
     }
 
     #[test]
@@ -1119,10 +1131,7 @@ mod tests {
             sunset_hour_angle: None,
         };
         let rendered = format!("{polar_day}");
-        assert_eq!(
-            rendered.matches("none (polar day or polar night)").count(),
-            4
-        );
+        assert_eq!(rendered.matches("none (no horizon crossing)").count(), 4);
         assert!(rendered.contains("Sun transit:"));
         assert!(rendered.contains("Sun transit altitude:"));
     }
@@ -1232,5 +1241,113 @@ mod tests {
                 Err(SpaTimeError::EventOutOfRange)
             );
         }
+    }
+
+    #[test]
+    fn polar_transition_returns_only_the_crossing_that_exists() {
+        let date = SpaDateTime::new(Utc.with_ymd_and_hms(2026, 5, 18, 12, 0, 0).unwrap());
+        let observer = Observer::try_at_sea_level_isa(69.6492, 18.9553).unwrap();
+        let day = SolarDay::compute_with_delta_t(&date, 69.1, observer).unwrap();
+        let sunrise = day.sunrise.unwrap();
+        let expected = Utc.with_ymd_and_hms(2026, 5, 17, 22, 51, 31).unwrap()
+            + chrono::TimeDelta::milliseconds(923);
+        assert!((sunrise - expected).num_milliseconds().abs() < 500);
+        assert!(day.sunset.is_none());
+    }
+
+    #[test]
+    fn an_event_crossing_utc_midnight_uses_its_actual_solar_coordinates() {
+        use crate::SolarPosition;
+
+        let date = SpaDateTime::new(Utc.with_ymd_and_hms(2026, 3, 20, 12, 0, 0).unwrap());
+        let observer = Observer::try_at_sea_level_isa(-33.8, 150.0).unwrap();
+        let day = SolarDay::compute_with_delta_t(&date, 70.0, observer).unwrap();
+        let sunrise = day.sunrise.unwrap();
+        let expected = Utc.with_ymd_and_hms(2026, 3, 19, 20, 2, 47).unwrap()
+            + chrono::TimeDelta::milliseconds(659);
+        assert!((sunrise - expected).num_milliseconds().abs() < 50);
+        let position =
+            SolarPosition::compute_with_delta_t(&SpaDateTime::new(sunrise), 70.0, observer)
+                .unwrap();
+        let altitude = sun_altitude_at_event(
+            observer.latitude(),
+            position.geocentric_declination,
+            position.observer_local_hour_angle,
+        );
+        assert!((altitude - SUN_ELEVATION_AT_HORIZON_DEGREES).abs() < 0.0003_f64);
+    }
+
+    fn position_altitude(datetime: chrono::DateTime<Utc>, observer: Observer) -> f64 {
+        let position =
+            crate::SolarPosition::compute_with_delta_t(&SpaDateTime::new(datetime), 69.1, observer)
+                .unwrap();
+        sun_altitude_at_event(
+            observer.latitude(),
+            position.geocentric_declination,
+            position.observer_local_hour_angle,
+        )
+    }
+
+    #[test]
+    fn reported_crossings_match_solar_positions_throughout_the_year() {
+        let start = Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap();
+        for day in 0..365 {
+            let datetime = SpaDateTime::new(start + chrono::TimeDelta::days(day));
+            for latitude in [
+                -90.0_f64,
+                -89.9_f64,
+                -80.0_f64,
+                -69.6492_f64,
+                -66.5_f64,
+                -40.0_f64,
+                0.0_f64,
+                40.0_f64,
+                66.5_f64,
+                69.6492_f64,
+                80.0_f64,
+                89.9_f64,
+                90.0_f64,
+            ] {
+                let observer = Observer::try_at_sea_level_isa(latitude, 18.9553).unwrap();
+                let events = SolarDay::compute_with_delta_t(&datetime, 69.1, observer).unwrap();
+                for (instant, rising) in [(events.sunrise, true), (events.sunset, false)] {
+                    if let Some(instant) = instant {
+                        let altitude = position_altitude(instant, observer);
+                        assert!(
+                            (altitude - SUN_ELEVATION_AT_HORIZON_DEGREES).abs() < 0.0003_f64,
+                            "{instant} at {latitude}: {altitude}"
+                        );
+                        let before =
+                            position_altitude(instant - chrono::TimeDelta::minutes(1), observer);
+                        let after =
+                            position_altitude(instant + chrono::TimeDelta::minutes(1), observer);
+                        assert_eq!(after > before, rising, "{instant} at {latitude}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn event_dates_respect_calendar_carries_and_unrepresentable_labels() {
+        use super::event_datetime;
+        use crate::SpaTimeError;
+        use chrono::FixedOffset;
+
+        let last_julian = Utc.with_ymd_and_hms(1582, 10, 4, 0, 0, 0).unwrap();
+        assert_eq!(
+            event_datetime(last_julian, &Utc, 1.0).unwrap(),
+            Utc.with_ymd_and_hms(1582, 10, 15, 0, 0, 0).unwrap()
+        );
+        let julian_leap_eve = Utc.with_ymd_and_hms(-1000, 2, 28, 0, 0, 0).unwrap();
+        assert_eq!(
+            event_datetime(julian_leap_eve, &Utc, 1.0),
+            Err(SpaTimeError::EventOutOfRange)
+        );
+        let offset = FixedOffset::east_opt(14 * 3600).unwrap();
+        assert_eq!(
+            event_datetime(last_julian, &offset, 0.5),
+            Err(SpaTimeError::EventOutOfRange)
+        );
     }
 }
