@@ -79,7 +79,8 @@ report are straightforward.
 
 ## Development
 
-Install the same Lockpick revision used by CI, then run the quality checks:
+Install the same Lockpick revision used by CI, then run the quality checks, including 100% function, line, region and branch
+coverage:
 
 ```sh
 cargo install --git https://github.com/Kuenlun/lockpick --rev d611414b8676d5bf2b3b97ee4484a082b8749634 --locked lockpick
