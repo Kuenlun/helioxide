@@ -2,6 +2,11 @@
 // helioxide - Rust implementation of NREL Solar Position Algorithm (SPA)
 // Copyright (c) 2026 Juan Luis Leal Contreras (Kuenlun)
 
+#![expect(
+    unused_crate_dependencies,
+    reason = "Cargo supplies thiserror for the library's error types, but this executable does not use it directly."
+)]
+
 //! Print the current solar position and daily events for the example observer.
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
@@ -9,7 +14,6 @@
 use chrono::Utc;
 use chrono_tz::Tz;
 use helioxide::{Observer, SolarDay, SolarPosition, SpaDateTime, Surface};
-use thiserror as _;
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[expect(
