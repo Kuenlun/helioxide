@@ -28,9 +28,12 @@ use crate::obliquity::true_obliquity_of_ecliptic;
 use crate::sidereal::{apparent_sidereal_time, mean_sidereal_time};
 use crate::spa::Observer;
 
-/// `h'₀ = -0.8333°` (solar disk radius `0.26667°` plus horizon-level
-/// refraction `0.5667°`), per appendix A.2.
-pub const SUN_ELEVATION_AT_HORIZON_DEGREES: f64 = -0.8333;
+/// Solar disk radius `0.26667°` plus horizon refraction `0.5667°`, negated.
+///
+/// Appendix A.2 prints the rounded value `-0.8333°`; retain the full sum
+/// `-0.83337°` consistently for events and atmospheric refraction.
+pub const SUN_ELEVATION_AT_HORIZON_DEGREES: f64 =
+    crate::horizontal::HORIZON_CUTOFF_ELEVATION_DEGREES;
 
 /// Earth's sidereal rotation rate `360.985647°/day` of equation A7.
 const EARTH_SIDEREAL_DAILY_ROTATION_DEGREES: f64 = 360.985_647;
@@ -180,6 +183,7 @@ pub fn sun_altitude_at_event(
 
     (cos_phi * cos_delta)
         .mul_add(cos_h, sin_phi * sin_delta)
+        .clamp(-1.0, 1.0)
         .asin()
         .to_degrees()
 }
@@ -1127,5 +1131,12 @@ mod tests {
             let mut writer = FailingWriter { remaining: total };
             assert!(core::fmt::Write::write_fmt(&mut writer, format_args!("{day}")).is_ok());
         }
+    }
+
+    #[test]
+    fn event_altitude_preserves_zenith_and_nadir_under_roundoff() {
+        assert!((sun_altitude_at_event(0.015, 0.015, 0.0) - 90.0).abs() < 1e-12_f64);
+        assert!((sun_altitude_at_event(0.015, -0.015, 180.0) + 90.0).abs() < 1e-12_f64);
+        assert!(sun_altitude_at_event(f64::NAN, 0.0, 0.0).is_nan());
     }
 }

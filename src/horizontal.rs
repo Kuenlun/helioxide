@@ -16,11 +16,13 @@ pub const REFERENCE_TEMPERATURE_KELVIN: f64 = 283.0;
 /// `273` of equation 42's `273 + T` (the paper drops the `0.15` of strict IAU).
 pub const KELVIN_OFFSET_FROM_CELSIUS: f64 = 273.0;
 
-/// `-0.8333°`: sun-disk radius plus horizon-level refraction (`0.26667° + 0.5667°`,
-/// rounded per appendix A.2). Below this elevation the upper limb is at or
-/// below the geometric horizon, so equation 42's "below the horizon" branch
-/// collapses `Δe` to zero.
-const HORIZON_CUTOFF_ELEVATION_DEGREES: f64 = -0.8333;
+/// Solar disk radius used with the horizon refraction in appendix A.2.
+const SUN_RADIUS_DEGREES: f64 = 0.266_67;
+/// Typical atmospheric refraction at sunrise and sunset in appendix A.2.
+const HORIZON_REFRACTION_DEGREES: f64 = 0.5667;
+/// Unrounded upper-limb horizon, shared by refraction and daily events.
+pub(crate) const HORIZON_CUTOFF_ELEVATION_DEGREES: f64 =
+    -(SUN_RADIUS_DEGREES + HORIZON_REFRACTION_DEGREES);
 
 /// `e₀ = arcsin(sin φ · sin δ' + cos φ · cos δ' · cos H')` (degrees,
 /// in `[-90°, 90°]`). Equation 41.
@@ -37,6 +39,7 @@ pub fn topocentric_elevation_without_refraction(
 
     (cos_phi * cos_delta_prime)
         .mul_add(cos_h_prime, sin_phi * sin_delta_prime)
+        .clamp(-1.0, 1.0)
         .asin()
         .to_degrees()
 }
@@ -320,5 +323,25 @@ mod tests {
             assert!((signed - expected).abs() < 1e-12_f64);
             assert!(signed > -180.0_f64 && signed <= 180.0_f64);
         }
+    }
+
+    #[test]
+    fn elevation_roundoff_at_both_poles_of_the_unit_sphere_is_bounded() {
+        assert!(
+            (topocentric_elevation_without_refraction(0.015, 0.015, 0.0) - 90.0).abs() < 1e-12_f64
+        );
+        assert!(
+            (topocentric_elevation_without_refraction(0.015, -0.015, 180.0) + 90.0).abs()
+                < 1e-12_f64
+        );
+        assert!(topocentric_elevation_without_refraction(f64::NAN, 0.0, 0.0).is_nan());
+    }
+
+    #[test]
+    fn refraction_uses_the_unrounded_upper_limb_horizon() {
+        let elevation = -0.833_333_131_323_261_5_f64;
+        let zenith =
+            topocentric_zenith_angle(elevation, atmospheric_refraction(elevation, 1010.0, 10.0));
+        assert!((zenith - 90.215_091_469_783_09).abs() < 1e-12_f64);
     }
 }

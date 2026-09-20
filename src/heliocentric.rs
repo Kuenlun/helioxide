@@ -313,10 +313,9 @@ mod tests {
         1.232_361,
     ];
 
-    /// Hybrid tolerance: tracks the table's trailing-digit precision while
-    /// loosening to 1 ulp at the magnitude of the largest term (`L1 ≈ 6·10¹¹`).
+    /// Allow the printed six-decimal rounding and one binary64 ULP at L1.
     fn assert_close(actual: f64, expected: f64, label: &str) {
-        let tolerance = expected.abs().mul_add(1e-12, 1e-6);
+        let tolerance = (expected.next_up() - expected).max(1e-6_f64);
         assert!(
             (actual - expected).abs() <= tolerance,
             "{label}: expected {expected}, got {actual}",
